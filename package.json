@@ -1,0 +1,75 @@
+{
+  "name": "@cboxdk/id-js",
+  "version": "0.1.0",
+  "description": "Turnkey Cbox ID client for JavaScript/TypeScript — OpenID Connect login (PKCE + id_token verification via JWKS), hosted profile-management redirect, machine tokens, UserInfo, RFC 7662 introspection, and webhook signature verification. Runs on Node, edge, and the browser, with a first-class Next.js adapter.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Sylvester Damgaard <sn@cbox.dk>",
+  "homepage": "https://github.com/cboxdk/id-js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cboxdk/id-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cboxdk/id-js/issues"
+  },
+  "keywords": [
+    "oidc",
+    "openid-connect",
+    "oauth2",
+    "pkce",
+    "authentication",
+    "sso",
+    "nextjs",
+    "cbox-id"
+  ],
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./nextjs": {
+      "types": "./dist/nextjs.d.ts",
+      "import": "./dist/nextjs.js",
+      "require": "./dist/nextjs.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "jose": "^6.0.0"
+  },
+  "peerDependencies": {
+    "next": "^14.0.0 || ^15.0.0 || ^16.0.0"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

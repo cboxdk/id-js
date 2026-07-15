@@ -1,0 +1,81 @@
+/** Configuration for a {@link CboxIdClient}. */
+export interface CboxIdConfig {
+  /**
+   * Base URL (issuer) of the Cbox ID instance, e.g. `https://id.acme.com`. Every
+   * endpoint is discovered from `{issuer}/.well-known/openid-configuration`, so this
+   * is usually the only endpoint you configure.
+   */
+  issuer: string;
+  /** Your registered OAuth client id. */
+  clientId: string;
+  /**
+   * Your client secret. Required for confidential (server-side) apps, machine
+   * tokens and introspection. Omit for public clients (SPA/native) that only do
+   * PKCE login.
+   */
+  clientSecret?: string;
+  /** Your callback URL — must exactly match one registered on the client. */
+  redirectUri: string;
+  /** Scopes requested at login. Defaults to `['openid', 'profile', 'email']`. */
+  scopes?: string[];
+  /**
+   * Path of the instance's hosted account page that {@link CboxIdClient.profileUrl}
+   * points at. Defaults to `/settings`.
+   */
+  accountPath?: string;
+  /** Timeout (ms) for back-channel HTTP calls. Defaults to `10000`. */
+  timeoutMs?: number;
+  /** How long (ms) the discovery document is cached. Defaults to `3600000` (1h). */
+  cacheTtlMs?: number;
+}
+
+/** The OIDC discovery document fields this SDK uses. */
+export interface DiscoveryDocument {
+  issuer: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  jwks_uri: string;
+  userinfo_endpoint?: string;
+  introspection_endpoint?: string;
+  end_session_endpoint?: string;
+}
+
+/**
+ * The values {@link CboxIdClient.createAuthorizationRequest} returns. Persist
+ * `state`, `codeVerifier` and `nonce` (e.g. in signed, httpOnly cookies) and hand
+ * them back to {@link CboxIdClient.authenticate} on the callback.
+ */
+export interface AuthorizationRequest {
+  /** The URL to redirect the user to. */
+  url: string;
+  state: string;
+  codeVerifier: string;
+  nonce: string;
+}
+
+/** The raw token-endpoint response. */
+export interface TokenResponse {
+  access_token: string;
+  token_type?: string;
+  id_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+}
+
+/**
+ * The authenticated Cbox ID user. `id` is the stable opaque subject (`sub`) you key
+ * your local account on. `claims` is the full verified id_token + userinfo claim
+ * set; the named fields are conveniences over it.
+ */
+export interface CboxUser {
+  id: string;
+  email: string | null;
+  name: string | null;
+  organizationId: string | null;
+  claims: Record<string, unknown>;
+  accessToken: string;
+  refreshToken: string | null;
+  idToken: string | null;
+  expiresIn: number;
+}
