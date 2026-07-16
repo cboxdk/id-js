@@ -76,6 +76,7 @@ export class CboxIdClient {
     state?: string;
     prompt?: string;
     loginHint?: string;
+    maxAge?: number;
   } = {}): Promise<AuthorizationRequest> {
     const codeVerifier = createVerifier();
     const state = options.state ?? randomToken(16);
@@ -96,6 +97,9 @@ export class CboxIdClient {
     }
     if (options.loginHint) {
       params.set('login_hint', options.loginHint);
+    }
+    if (typeof options.maxAge === 'number') {
+      params.set('max_age', String(options.maxAge));
     }
 
     const endpoint = await this.discovery.endpoint('authorization_endpoint');
