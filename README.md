@@ -106,6 +106,26 @@ const ok = await verifyWebhook({
 });
 ```
 
+## Token Vault
+
+Broker downstream credentials (API keys for OpenAI, GitHub, …) through the instance's
+Token Vault: provision + grant with a `vault.manage` token, and let an authorized
+agent client redeem the plaintext with a `vault.lease` token.
+
+```ts
+// Provisioning backend (vault.manage)
+const admin = client.vault(await client.machineToken({ scopes: ['vault.manage'] }));
+const secret = await admin.store({ name: 'openai', provider: 'openai', secret: 'sk-live-…' });
+await admin.grant(secret.id, 'agent-1');
+
+// Agent worker (vault.lease) — keyed on its own client
+const agent = client.vault(await client.machineToken({ scopes: ['vault.lease'] }));
+const lease = await agent.lease(secret.id, 'call openai');
+// use lease.secret immediately; it is never persisted
+```
+
+A lease with no live grant is refused — the vault is deny-by-default.
+
 ## Security & scope
 
 Login is hardened by default — PKCE, `state`, nonce, and full `id_token` verification

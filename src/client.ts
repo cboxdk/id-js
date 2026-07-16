@@ -8,6 +8,7 @@ import type {
   CboxUser,
   TokenResponse,
 } from './types.js';
+import { VaultClient } from './vault.js';
 import { verifyWebhook, type VerifyWebhookOptions } from './webhook.js';
 
 type JwksResolver = ReturnType<typeof createRemoteJWKSet>;
@@ -245,6 +246,15 @@ export class CboxIdClient {
   /** Verify a Cbox ID webhook / inline-action signature. See {@link verifyWebhook}. */
   verifyWebhook(options: VerifyWebhookOptions): Promise<boolean> {
     return verifyWebhook(options);
+  }
+
+  /**
+   * A Token Vault client bound to an access token. Obtain the token with
+   * {@link machineToken} (scope `vault.manage` to provision/grant, `vault.lease` to
+   * redeem), then call `store` / `grant` / `lease` etc.
+   */
+  vault(accessToken: string): VaultClient {
+    return new VaultClient(this.config.issuer, accessToken, this.config.timeoutMs ?? 10_000);
   }
 
   private async exchange(code: string, verifier: string, redirectUri?: string): Promise<TokenResponse> {

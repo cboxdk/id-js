@@ -2,6 +2,8 @@ export { CboxIdClient } from './client.js';
 export type { CallbackParams, StoredAuthState } from './client.js';
 export { verifyWebhook } from './webhook.js';
 export type { VerifyWebhookOptions } from './webhook.js';
+export { VaultClient } from './vault.js';
+export type { VaultSecretRef, VaultLease, StoreSecretInput } from './vault.js';
 export {
   CboxIdError,
   ConfigurationError,
