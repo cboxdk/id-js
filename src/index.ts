@@ -11,6 +11,15 @@ export {
   AuthenticationError,
 } from './errors.js';
 export { createVerifier, challenge, randomToken } from './pkce.js';
+export { defineAuthz, buildManifest, publishManifest } from './authz.js';
+export type {
+  PermissionDefinition,
+  RoleDefinition,
+  AuthzDeclaration,
+  AuthzManifest,
+  ManifestPublisherConfig,
+  ManifestSyncSummary,
+} from './authz.js';
 export type {
   CboxIdConfig,
   CboxUser,

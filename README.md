@@ -126,6 +126,47 @@ const lease = await agent.lease(secret.id, 'call openai');
 
 A lease with no live grant is refused — the vault is deny-by-default.
 
+## Roles & permissions (federated RBAC)
+
+Declare your app's authorization **roles** and **permissions** in code, then push them
+to Cbox ID on deploy. Your app owns what a role *means*; Cbox ID owns identity and who
+*holds* each role — assignments arrive back in the token's `roles` / `permissions`
+claims for you to enforce. Requires the app's client to hold the `apps.manifest` scope.
+
+```ts
+import { defineAuthz, publishManifest } from '@cboxdk/id-js';
+
+// Declare the catalog (validated: keys are `feature:action`, roles must reference
+// declared permissions). Keep this next to the code that enforces it.
+export const authz = defineAuthz({
+  permissions: [
+    { key: 'invoices:create', description: 'Create invoices' },
+    { key: 'invoices:read', description: 'View invoices' },
+  ],
+  roles: [
+    { key: 'billing-admin', name: 'Billing Admin', description: 'Full billing access',
+      permissions: ['invoices:create', 'invoices:read'] },
+  ],
+});
+
+// Push it — run from a deploy step or a `package.json` script. Idempotent: an
+// unchanged catalog is a server-side no-op (the manifest carries a content hash).
+const summary = await publishManifest(
+  {
+    issuer: process.env.CBOX_ID_ISSUER!,
+    clientId: process.env.CBOX_ID_CLIENT_ID!,
+    clientSecret: process.env.CBOX_ID_CLIENT_SECRET!,
+  },
+  authz,
+);
+// → { unchanged, roles_declared, permissions_declared, ... }
+```
+
+`publishManifest` mints a client-credentials token (`scope=apps.manifest`) and POSTs
+the manifest to `{issuer}/api/v1/apps/manifest`. It is a server-side operation — keep
+your `clientSecret` off the browser. The wire format matches the PHP SDK
+(`cboxdk/laravel-id-client`), so any SDK can publish the same catalog.
+
 ## Security & scope
 
 Login is hardened by default — PKCE, `state`, nonce, and full `id_token` verification
