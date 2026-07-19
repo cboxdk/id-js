@@ -5,6 +5,7 @@ import { challenge, createVerifier, randomToken } from './pkce.js';
 import type {
   AuthorizationRequest,
   CboxIdConfig,
+  CboxOrganization,
   CboxUser,
   TokenResponse,
 } from './types.js';
@@ -152,11 +153,15 @@ export class CboxIdClient {
       throw new AuthenticationError('The verified token carried no subject.');
     }
 
+    const organizations = parseOrganizations(claims['organizations']);
+
     return {
       id: sub,
       email: typeof claims['email'] === 'string' ? claims['email'] : null,
       name: typeof claims['name'] === 'string' ? claims['name'] : null,
       organizationId: typeof claims['org'] === 'string' ? claims['org'] : null,
+      // Only present when the instance emitted the claim (exactOptionalPropertyTypes).
+      ...(organizations ? { organizations } : {}),
       claims,
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token ?? null,
@@ -351,4 +356,28 @@ function timingSafeEqualString(a: string, b: string): boolean {
     mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
   return mismatch === 0;
+}
+
+/**
+ * Parse an `organizations` claim into typed orgs, ignoring anything malformed. The
+ * claim is optional and instance-specific; absent or non-array → undefined, so
+ * callers can tell "no claim" from "empty".
+ */
+function parseOrganizations(claim: unknown): CboxOrganization[] | undefined {
+  if (!Array.isArray(claim)) {
+    return undefined;
+  }
+  const orgs: CboxOrganization[] = [];
+  for (const entry of claim) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    const id = record['id'];
+    const name = record['name'];
+    if (typeof id === 'string' && id !== '' && typeof name === 'string' && name !== '') {
+      orgs.push({ id, name, role: typeof record['role'] === 'string' ? record['role'] : null });
+    }
+  }
+  return orgs;
 }

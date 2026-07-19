@@ -63,6 +63,14 @@ export interface TokenResponse {
   scope?: string;
 }
 
+/** One organization a user belongs to, from the `organizations` claim when present. */
+export interface CboxOrganization {
+  id: string;
+  name: string;
+  /** The member's role in this organization, when the claim carries it. */
+  role?: string | null;
+}
+
 /**
  * The authenticated Cbox ID user. `id` is the stable opaque subject (`sub`) you key
  * your local account on. `claims` is the full verified id_token + userinfo claim
@@ -72,7 +80,14 @@ export interface CboxUser {
   id: string;
   email: string | null;
   name: string | null;
+  /** The active organization's id (`org` claim). */
   organizationId: string | null;
+  /**
+   * The organizations this user belongs to, when the instance emits an
+   * `organizations` claim. Undefined when the claim is absent (single-org apps, or
+   * an instance that doesn't include it). Pass straight to `<OrganizationSwitcher>`.
+   */
+  organizations?: CboxOrganization[];
   claims: Record<string, unknown>;
   accessToken: string;
   refreshToken: string | null;

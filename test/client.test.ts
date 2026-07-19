@@ -76,6 +76,42 @@ describe('authenticate', () => {
     expect(user.claims['sub']).toBe('user-1');
   });
 
+  it('maps an organizations claim into typed orgs, dropping malformed entries', async () => {
+    const inst = await fakeInstance({
+      userinfo: {
+        sub: 'user-1',
+        email: 'ada@acme.com',
+        name: 'Ada',
+        org: 'org-1',
+        organizations: [
+          { id: 'org-1', name: 'Acme', role: 'admin' },
+          { id: 'org-2', name: 'Globex' }, // no role → null
+          { id: '', name: 'Nameless id' }, // malformed → dropped
+          'not-an-object', // ignored
+        ],
+      },
+    });
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    const user = await client.authenticate({ params: { code: 'auth-code', state: 'state-1' }, stored });
+
+    expect(user.organizations).toEqual([
+      { id: 'org-1', name: 'Acme', role: 'admin' },
+      { id: 'org-2', name: 'Globex', role: null },
+    ]);
+  });
+
+  it('omits organizations when the instance emits no such claim', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    const user = await client.authenticate({ params: { code: 'auth-code', state: 'state-1' }, stored });
+
+    expect(user.organizations).toBeUndefined();
+  });
+
   it('rejects a mismatched state (CSRF)', async () => {
     const inst = await fakeInstance();
     vi.stubGlobal('fetch', inst.fetchMock);
