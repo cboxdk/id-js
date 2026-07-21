@@ -20,6 +20,10 @@ first-class **Next.js** adapter.
 
 ## Install
 
+> **Where do `issuer`, `clientId` and `redirectUri` come from?**
+> Register an application in your environment console — see
+> [Integrate your app](https://github.com/cboxdk/cbox-id/blob/main/docs/getting-started/integrate-your-app.md).
+
 ```bash
 npm install @cboxdk/id-js
 ```
