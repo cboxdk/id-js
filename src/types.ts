@@ -63,6 +63,19 @@ export interface TokenResponse {
   scope?: string;
 }
 
+/**
+ * The tokens returned by {@link CboxIdClient.refresh}. Cbox ID ROTATES refresh
+ * tokens and detects reuse, so `refreshToken` is a NEW value — store it and discard
+ * the one you presented; replaying a rotated token revokes the whole family.
+ */
+export interface RefreshedTokens {
+  accessToken: string;
+  refreshToken: string | null;
+  idToken: string | null;
+  expiresIn: number;
+  scope: string | null;
+}
+
 /** One organization a user belongs to, from the `organizations` claim when present. */
 export interface CboxOrganization {
   id: string;

@@ -187,6 +187,28 @@ describe('authenticate', () => {
   });
 });
 
+describe('refresh', () => {
+  it('exchanges a refresh token for rotated tokens', async () => {
+    const inst = await fakeInstance();
+    inst.setTokenResponse({
+      access_token: 'access-2',
+      refresh_token: 'refresh-2',
+      expires_in: 3600,
+      token_type: 'Bearer',
+      scope: 'openid offline_access',
+    });
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    const tokens = await client.refresh('refresh-abc');
+
+    expect(tokens.accessToken).toBe('access-2');
+    expect(tokens.refreshToken).toBe('refresh-2');
+    expect(tokens.expiresIn).toBe(3600);
+    expect(tokens.scope).toBe('openid offline_access');
+  });
+});
+
 describe('back-channel calls', () => {
   it('mints a machine (client-credentials) token', async () => {
     const inst = await fakeInstance();

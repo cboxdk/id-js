@@ -25,5 +25,6 @@ export type {
   CboxUser,
   AuthorizationRequest,
   TokenResponse,
+  RefreshedTokens,
   DiscoveryDocument,
 } from './types.js';

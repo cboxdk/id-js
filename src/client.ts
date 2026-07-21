@@ -7,6 +7,7 @@ import type {
   CboxIdConfig,
   CboxOrganization,
   CboxUser,
+  RefreshedTokens,
   TokenResponse,
 } from './types.js';
 import { VaultClient } from './vault.js';
@@ -167,6 +168,43 @@ export class CboxIdClient {
       refreshToken: tokens.refresh_token ?? null,
       idToken: tokens.id_token ?? null,
       expiresIn: typeof tokens.expires_in === 'number' ? tokens.expires_in : 0,
+    };
+  }
+
+  /**
+   * Exchange a refresh token for a fresh access token (OAuth 2.0 `refresh_token`
+   * grant). Cbox ID rotates refresh tokens and detects reuse, so ALWAYS persist the
+   * returned `refreshToken` and discard the one you passed — presenting a rotated
+   * token again revokes the entire token family.
+   *
+   * @throws AuthenticationError when the refresh token is invalid, expired, or already rotated.
+   */
+  async refresh(refreshToken: string): Promise<RefreshedTokens> {
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: this.config.clientId,
+      refresh_token: refreshToken,
+    });
+    if (this.config.clientSecret) {
+      body.set('client_secret', this.config.clientSecret);
+    }
+
+    const response = await this.post(await this.discovery.endpoint('token_endpoint'), body);
+    if (!response.ok) {
+      throw new AuthenticationError(`Token refresh failed: ${await response.text()}`);
+    }
+
+    const tokens = (await response.json()) as TokenResponse;
+    if (!tokens.access_token) {
+      throw new AuthenticationError('The refresh response carried no access token.');
+    }
+
+    return {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token ?? null,
+      idToken: tokens.id_token ?? null,
+      expiresIn: typeof tokens.expires_in === 'number' ? tokens.expires_in : 0,
+      scope: typeof tokens.scope === 'string' ? tokens.scope : null,
     };
   }
 
