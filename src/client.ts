@@ -201,7 +201,9 @@ export class CboxIdClient {
 
     return {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token ?? null,
+      // Keep the presented token when the server does not rotate (OAuth 2.0 §6);
+      // callers persist this value, so it must never come back null.
+      refreshToken: tokens.refresh_token ?? refreshToken,
       idToken: tokens.id_token ?? null,
       expiresIn: typeof tokens.expires_in === 'number' ? tokens.expires_in : 0,
       scope: typeof tokens.scope === 'string' ? tokens.scope : null,

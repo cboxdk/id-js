@@ -70,7 +70,7 @@ export interface TokenResponse {
  */
 export interface RefreshedTokens {
   accessToken: string;
-  refreshToken: string | null;
+  refreshToken: string;
   idToken: string | null;
   expiresIn: number;
   scope: string | null;
