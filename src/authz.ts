@@ -91,10 +91,10 @@ export async function buildManifest(declaration: AuthzDeclaration): Promise<Auth
   const roles = (declaration.roles ?? []).map(canonicalRole);
   assertDeclaration(permissions, roles);
 
-  permissions.sort((a, b) => a.key.localeCompare(b.key));
-  roles.sort((a, b) => a.key.localeCompare(b.key));
+  permissions.sort((a, b) => byteCompare(a.key, b.key));
+  roles.sort((a, b) => byteCompare(a.key, b.key));
 
-  const version = (await sha256Hex(JSON.stringify({ permissions, roles }))).slice(0, 16);
+  const version = (await sha256Hex(canonicalManifestJson(permissions, roles))).slice(0, 16);
   return { version, permissions, roles };
 }
 
@@ -219,10 +219,64 @@ function canonicalPermission(permission: PermissionDefinition): PermissionDefini
 
 /** A role with keys in a fixed order, sorted permission refs, and no `undefined` fields. */
 function canonicalRole(role: RoleDefinition): RoleDefinition {
-  const permissions = [...role.permissions].sort((a, b) => a.localeCompare(b));
+  const permissions = [...role.permissions].sort(byteCompare);
   return role.description === undefined
     ? { key: role.key, name: role.name, permissions }
     : { key: role.key, name: role.name, description: role.description, permissions };
+}
+
+/**
+ * Serialize {permissions, roles} to the exact canonical JSON the PHP reference hashes,
+ * so the `version` is byte-for-byte identical across every Cbox ID SDK. Matches PHP
+ * `json_encode` defaults: object keys in insertion order, permissions and roles sorted
+ * by key, each role's permission refs sorted, an absent-or-empty description emitted as
+ * `null`, forward slashes escaped as `\/`, and every non-ASCII code unit as `\uXXXX`.
+ */
+export function canonicalManifestJson(
+  permissions: PermissionDefinition[],
+  roles: RoleDefinition[],
+): string {
+  const canonical = {
+    permissions: [...permissions]
+      .sort((a, b) => byteCompare(a.key, b.key))
+      .map((p) => ({ key: p.key, description: emptyToNull(p.description) })),
+    roles: [...roles]
+      .sort((a, b) => byteCompare(a.key, b.key))
+      .map((r) => ({
+        key: r.key,
+        name: r.name,
+        description: emptyToNull(r.description),
+        permissions: [...r.permissions].sort(byteCompare),
+      })),
+  };
+  return escapeLikePhp(JSON.stringify(canonical));
+}
+
+/** PHP treats an absent or empty description as `null` in the hashed catalog. */
+function emptyToNull(value: string | undefined): string | null {
+  return value === undefined || value === '' ? null : value;
+}
+
+/** Byte-wise (code-unit) comparison — matches PHP `strcmp` on the ASCII-only keys. */
+function byteCompare(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Apply PHP `json_encode`'s default `\/` slash and `\uXXXX` non-ASCII escaping. */
+function escapeLikePhp(json: string): string {
+  let out = '';
+  for (let i = 0; i < json.length; i++) {
+    const char = json.charAt(i);
+    const code = json.charCodeAt(i);
+    if (char === '/') {
+      out += '\\/';
+    } else if (code > 0x7f) {
+      out += '\\u' + code.toString(16).padStart(4, '0');
+    } else {
+      out += char;
+    }
+  }
+  return out;
 }
 
 async function sha256Hex(input: string): Promise<string> {

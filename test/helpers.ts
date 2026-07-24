@@ -22,9 +22,19 @@ function json(body: unknown, status = 200): Response {
 
 export const NONCE = 'test-nonce';
 
+/** Optional overrides for the timestamps a signed id_token carries. */
+export interface SignOptions {
+  /** `exp` — an epoch-seconds number or a jose duration string (default `'5m'`). */
+  expiresAt?: number | string;
+  /** `iat` — epoch seconds (default: now). */
+  issuedAt?: number;
+}
+
 export interface FakeInstance {
   jwk: JWK;
-  signIdToken(claims: Record<string, unknown>): Promise<string>;
+  signIdToken(claims: Record<string, unknown>, opts?: SignOptions): Promise<string>;
+  /** Sign an id_token with a DIFFERENT key than the JWKS advertises (kid still `test-key`). */
+  foreignIdToken(claims: Record<string, unknown>): Promise<string>;
   /** Replace what the token endpoint returns for an authorization_code exchange. */
   setTokenResponse(response: Record<string, unknown>): void;
   fetchMock: ReturnType<typeof vi.fn>;
@@ -48,12 +58,23 @@ export async function fakeInstance(
   jwk.alg = 'RS256';
   jwk.use = 'sig';
 
-  const signIdToken = (claims: Record<string, unknown>): Promise<string> =>
+  const signIdToken = (claims: Record<string, unknown>, opts: SignOptions = {}): Promise<string> =>
     new SignJWT(claims)
+      .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
+      .setIssuedAt(opts.issuedAt)
+      .setExpirationTime(opts.expiresAt ?? '5m')
+      .sign(privateKey);
+
+  // A token signed by a foreign keypair but presenting the advertised kid, so the
+  // verifier picks the real JWKS key and the signature check must fail.
+  const foreignIdToken = async (claims: Record<string, unknown>): Promise<string> => {
+    const foreign = await generateKeyPair('RS256', { extractable: true });
+    return new SignJWT(claims)
       .setProtectedHeader({ alg: 'RS256', kid: 'test-key' })
       .setIssuedAt()
       .setExpirationTime('5m')
-      .sign(privateKey);
+      .sign(foreign.privateKey);
+  };
 
   const defaultIdToken = await signIdToken({
     iss: ISSUER,
@@ -104,5 +125,5 @@ export async function fakeInstance(
     tokenResponse = response;
   };
 
-  return { jwk, signIdToken, setTokenResponse, fetchMock };
+  return { jwk, signIdToken, foreignIdToken, setTokenResponse, fetchMock };
 }

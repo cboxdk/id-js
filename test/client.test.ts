@@ -185,6 +185,67 @@ describe('authenticate', () => {
       client.authenticate({ params: { code: 'auth-code', state: 'state-1' }, stored }),
     ).rejects.toBeInstanceOf(AuthenticationError);
   });
+
+  it('rejects an id_token signed by a key the JWKS does not advertise', async () => {
+    const inst = await fakeInstance();
+    // Signed with a foreign keypair; the JWKS only advertises the real key, so the
+    // signature must fail to verify. A regression that skipped the signature check
+    // would let this token through.
+    const forged = await inst.foreignIdToken({
+      iss: ISSUER,
+      aud: 'client-abc',
+      sub: 'user-1',
+      nonce: NONCE,
+    });
+    inst.setTokenResponse({ access_token: 'access-abc', id_token: forged });
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(
+      client.authenticate({ params: { code: 'auth-code', state: 'state-1' }, stored }),
+    ).rejects.toBeInstanceOf(AuthenticationError);
+  });
+
+  it('rejects an id_token whose payload was tampered after signing', async () => {
+    const inst = await fakeInstance();
+    const valid = await inst.signIdToken({
+      iss: ISSUER,
+      aud: 'client-abc',
+      sub: 'user-1',
+      nonce: NONCE,
+    });
+    // Escalate the subject but re-attach the ORIGINAL signature — verification must reject.
+    const [header, payload, signature] = valid.split('.');
+    const decoded = JSON.parse(Buffer.from(payload!, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    decoded['sub'] = 'attacker';
+    const tampered = `${header}.${Buffer.from(JSON.stringify(decoded)).toString('base64url')}.${signature}`;
+    inst.setTokenResponse({ access_token: 'access-abc', id_token: tampered });
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(
+      client.authenticate({ params: { code: 'auth-code', state: 'state-1' }, stored }),
+    ).rejects.toBeInstanceOf(AuthenticationError);
+  });
+
+  it('rejects an expired id_token', async () => {
+    const inst = await fakeInstance();
+    const past = Math.floor(Date.now() / 1000) - 60;
+    const expired = await inst.signIdToken(
+      { iss: ISSUER, aud: 'client-abc', sub: 'user-1', nonce: NONCE },
+      { expiresAt: past, issuedAt: past - 300 },
+    );
+    inst.setTokenResponse({ access_token: 'access-abc', id_token: expired });
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(
+      client.authenticate({ params: { code: 'auth-code', state: 'state-1' }, stored }),
+    ).rejects.toBeInstanceOf(AuthenticationError);
+  });
 });
 
 describe('refresh', () => {

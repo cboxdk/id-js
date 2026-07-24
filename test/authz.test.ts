@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildManifest,
@@ -5,7 +7,25 @@ import {
   defineAuthz,
   publishManifest,
 } from '../src/index.js';
+import { canonicalManifestJson } from '../src/authz.js';
 import { discovery, ISSUER } from './helpers.js';
+
+interface FixtureCase {
+  name: string;
+  permissions: { key: string; description: string | null }[];
+  roles: { key: string; name: string; description: string | null; permissions: string[] }[];
+  canonical_json: string;
+  sha256: string;
+  version: string;
+}
+
+// The shared cross-SDK fixture: manifests + their canonical JSON and hash, generated
+// from the PHP reference (Cbox\Id\AccessControl\Manifest\Manifest::checksum). id-js,
+// id-python, id-go and laravel-id all assert against this same file so the four stay
+// byte-for-byte locked together.
+const fixture = JSON.parse(
+  readFileSync(fileURLToPath(new URL('./fixtures/manifest-hash.json', import.meta.url)), 'utf8'),
+) as { cases: FixtureCase[] };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -61,6 +81,29 @@ describe('buildManifest', () => {
     });
     expect(a.version).not.toBe(b.version);
   });
+});
+
+describe('cross-SDK manifest hash fixture', () => {
+  for (const testCase of fixture.cases) {
+    it(`matches the PHP reference canonical hash: ${testCase.name}`, async () => {
+      // A null description in the fixture means "not declared" — omit the field.
+      const permissions = testCase.permissions.map((p) =>
+        p.description === null ? { key: p.key } : { key: p.key, description: p.description },
+      );
+      const roles = testCase.roles.map((r) =>
+        r.description === null
+          ? { key: r.key, name: r.name, permissions: r.permissions }
+          : { key: r.key, name: r.name, description: r.description, permissions: r.permissions },
+      );
+
+      // Byte-for-byte identical canonical serialization to PHP's json_encode.
+      expect(canonicalManifestJson(permissions, roles)).toBe(testCase.canonical_json);
+      // The SDK's own sha256 of those bytes, truncated to 16 hex, matches the fixture.
+      const manifest = await buildManifest({ permissions, roles });
+      expect(manifest.version).toBe(testCase.version);
+      expect(testCase.version).toBe(testCase.sha256.slice(0, 16));
+    });
+  }
 });
 
 describe('defineAuthz', () => {
