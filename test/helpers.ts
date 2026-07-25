@@ -10,6 +10,7 @@ export const discovery = {
   jwks_uri: `${ISSUER}/oauth/jwks`,
   userinfo_endpoint: `${ISSUER}/oauth/userinfo`,
   introspection_endpoint: `${ISSUER}/oauth/introspect`,
+  revocation_endpoint: `${ISSUER}/oauth/revoke`,
   end_session_endpoint: `${ISSUER}/oauth/logout`,
 };
 
@@ -30,8 +31,17 @@ export interface SignOptions {
   issuedAt?: number;
 }
 
+/** A form POST the fake instance recorded, so tests can assert what was sent. */
+export interface RecordedRequest {
+  url: string;
+  authorization: string | null;
+  body: URLSearchParams;
+}
+
 export interface FakeInstance {
   jwk: JWK;
+  /** The last request the revocation endpoint received, or null. */
+  revocation(): RecordedRequest | null;
   signIdToken(claims: Record<string, unknown>, opts?: SignOptions): Promise<string>;
   /** Sign an id_token with a DIFFERENT key than the JWKS advertises (kid still `test-key`). */
   foreignIdToken(claims: Record<string, unknown>): Promise<string>;
@@ -94,6 +104,8 @@ export async function fakeInstance(
     token_type: 'Bearer',
   };
 
+  let revocation: RecordedRequest | null = null;
+
   const fetchMock = vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
     const url = String(input instanceof Request ? input.url : input);
 
@@ -118,6 +130,16 @@ export async function fakeInstance(
     if (url === discovery.introspection_endpoint) {
       return json(overrides.introspection ?? { active: true, sub: 'user-1', scope: 'openid' });
     }
+    if (url === discovery.revocation_endpoint) {
+      const headers = new Headers(init?.headers as HeadersInit | undefined);
+      revocation = {
+        url,
+        authorization: headers.get('authorization'),
+        body: new URLSearchParams(String(init?.body ?? '')),
+      };
+      // RFC 7009: a successful revocation carries an empty 200 body.
+      return new Response(null, { status: 200 });
+    }
     return new Response('not found', { status: 404 });
   });
 
@@ -125,5 +147,5 @@ export async function fakeInstance(
     tokenResponse = response;
   };
 
-  return { jwk, signIdToken, foreignIdToken, setTokenResponse, fetchMock };
+  return { jwk, revocation: () => revocation, signIdToken, foreignIdToken, setTokenResponse, fetchMock };
 }

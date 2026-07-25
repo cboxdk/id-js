@@ -9,6 +9,7 @@ import type {
   CboxUser,
   RefreshedTokens,
   TokenResponse,
+  TokenTypeHint,
 } from './types.js';
 import { VaultClient } from './vault.js';
 import { verifyWebhook, type VerifyWebhookOptions } from './webhook.js';
@@ -292,6 +293,29 @@ export class CboxIdClient {
     return (await response.json()) as Record<string, unknown>;
   }
 
+  /**
+   * RFC 7009 token revocation (confidential-client auth). Revokes an access or
+   * refresh token; revoking a refresh token also drops the whole token family, so
+   * this is what a real "sign out everywhere" does. Requires a secret.
+   *
+   * Per RFC 7009 the server answers 200 for an unknown or already-revoked token, so
+   * a successful call means "the token is not valid any more", not "it existed".
+   *
+   * @param tokenTypeHint which store to search first — only a hint, never required.
+   */
+  async revoke(token: string, tokenTypeHint?: TokenTypeHint): Promise<void> {
+    const endpoint = await this.discovery.endpoint('revocation_endpoint');
+    const basic = btoa(`${this.config.clientId}:${this.requireSecret()}`);
+    const body = new URLSearchParams({ token });
+    if (tokenTypeHint) {
+      body.set('token_type_hint', tokenTypeHint);
+    }
+    const response = await this.post(endpoint, body, { authorization: `Basic ${basic}` });
+    if (!response.ok) {
+      throw new AuthenticationError('Revocation request failed.');
+    }
+  }
+
   /** Verify a Cbox ID webhook / inline-action signature. See {@link verifyWebhook}. */
   verifyWebhook(options: VerifyWebhookOptions): Promise<boolean> {
     return verifyWebhook(options);
@@ -338,6 +362,10 @@ export class CboxIdClient {
       ({ payload } = await jwtVerify(idToken, resolver, {
         issuer: this.config.issuer,
         audience: this.config.clientId,
+        // Pin the accepted signature algorithms explicitly. `jose` already refuses
+        // `alg: none` and key-type confusion, so this is belt-and-braces — but it
+        // states the contract in code rather than relying on a library default.
+        algorithms: ['RS256', 'ES256'],
       }));
     } catch (error) {
       throw new AuthenticationError(`The id_token could not be verified: ${String(error)}`);

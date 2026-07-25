@@ -12,7 +12,7 @@ hosted-identity product needs:
 - **Hosted profile management** — send a signed-in user to the instance's own account
   page (password, MFA, passkeys, sessions) and back to your app.
 - **Back-channel calls** — machine (client-credentials) tokens, UserInfo, RFC 7662
-  introspection.
+  introspection, RFC 7009 revocation.
 - **Webhook / action verification** — confirm an inbound `X-Cbox-Signature`.
 
 Runs on Node, edge runtimes and the browser (built on Web Crypto and `fetch`), with a
@@ -96,7 +96,11 @@ const user = await client.authenticate({
 const token = await client.machineToken({ scopes: ['reports.read'] });   // as your app
 const claims = await client.userinfo(user.accessToken);                  // as a user
 const introspection = await client.introspect(someToken);                // RFC 7662
+await client.revoke(user.refreshToken!, 'refresh_token');                // RFC 7009
 ```
+
+Revoking a refresh token drops the whole token family — that's what "sign out
+everywhere" needs. Both calls are confidential-client, so they require a `clientSecret`.
 
 ## Verify webhooks
 

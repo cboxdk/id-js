@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AuthenticationError, CboxIdClient, InvalidStateError } from '../src/index.js';
+import {
+  AuthenticationError,
+  CboxIdClient,
+  ConfigurationError,
+  InvalidStateError,
+} from '../src/index.js';
 import { challenge } from '../src/pkce.js';
 import { fakeInstance, ISSUER, NONCE } from './helpers.js';
 
@@ -287,6 +292,39 @@ describe('back-channel calls', () => {
 
     const result = await client.introspect('some-token');
     expect(result['active']).toBe(true);
+  });
+
+  it('revokes a token with confidential-client auth and the type hint (RFC 7009)', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(client.revoke('refresh-abc', 'refresh_token')).resolves.toBeUndefined();
+
+    const sent = inst.revocation();
+    expect(sent?.url).toBe(`${ISSUER}/oauth/revoke`);
+    expect(sent?.authorization).toBe(`Basic ${btoa('client-abc:secret-xyz')}`);
+    expect(sent?.body.get('token')).toBe('refresh-abc');
+    expect(sent?.body.get('token_type_hint')).toBe('refresh_token');
+  });
+
+  it('omits token_type_hint when none is given', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    await client.revoke('access-abc');
+
+    expect(inst.revocation()?.body.has('token_type_hint')).toBe(false);
+  });
+
+  it('refuses to revoke without a client secret', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const { clientSecret: _omitted, ...publicConfig } = baseConfig;
+    const client = new CboxIdClient(publicConfig);
+
+    await expect(client.revoke('some-token')).rejects.toBeInstanceOf(ConfigurationError);
   });
 });
 

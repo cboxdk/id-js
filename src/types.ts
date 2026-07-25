@@ -37,8 +37,15 @@ export interface DiscoveryDocument {
   jwks_uri: string;
   userinfo_endpoint?: string;
   introspection_endpoint?: string;
+  revocation_endpoint?: string;
   end_session_endpoint?: string;
 }
+
+/**
+ * RFC 7009 `token_type_hint`: which token store the server should search first.
+ * Only a hint — the server must still find the token if the hint is wrong.
+ */
+export type TokenTypeHint = 'access_token' | 'refresh_token';
 
 /**
  * The values {@link CboxIdClient.createAuthorizationRequest} returns. Persist
