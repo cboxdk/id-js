@@ -27,6 +27,18 @@ export interface CboxIdConfig {
   timeoutMs?: number;
   /** How long (ms) the discovery document is cached. Defaults to `3600000` (1h). */
   cacheTtlMs?: number;
+  /**
+   * Leeway (seconds) when checking the id_token's `auth_time` against the `maxAge` you
+   * requested at login. Defaults to `60`.
+   *
+   * Some slack is required, not optional: `maxAge` bounds the age of the
+   * AUTHENTICATION, but `auth_time` is read after a browser redirect and a token
+   * exchange, so even a just-completed re-authentication is already several seconds
+   * old — and the RP's clock and the instance's need not agree. Sixty seconds absorbs
+   * that while still catching what this check exists for: a session hours or days old
+   * being passed off as fresh.
+   */
+  authTimeToleranceSeconds?: number;
 }
 
 /** The OIDC discovery document fields this SDK uses. */
@@ -58,6 +70,12 @@ export interface AuthorizationRequest {
   state: string;
   codeVerifier: string;
   nonce: string;
+  /**
+   * Echoed back when you passed `maxAge`. Persist it with the rest and hand it to
+   * {@link CboxIdClient.authenticate}, which then verifies the id_token's `auth_time`
+   * against it — a step-up nobody checks is not a step-up.
+   */
+  maxAge?: number;
 }
 
 /** The raw token-endpoint response. */

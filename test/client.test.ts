@@ -340,13 +340,33 @@ describe('hosted profile & logout', () => {
     );
   });
 
-  it('returns the RP-initiated logout URL from discovery', async () => {
+  // The OP validates post_logout_redirect_uri against the requesting client's
+  // registered allow-list, so a logout URL WITHOUT client_id can never redirect —
+  // it strands the user on a bare "signed out" page. Assert on the parsed params
+  // so a regression that drops client_id fails loudly.
+  it('always carries client_id on the RP-initiated logout URL', async () => {
     const inst = await fakeInstance();
     vi.stubGlobal('fetch', inst.fetchMock);
     const client = new CboxIdClient(baseConfig);
 
-    expect(await client.logoutUrl('https://app.test')).toBe(
-      `${ISSUER}/oauth/logout?post_logout_redirect_uri=https%3A%2F%2Fapp.test`,
-    );
+    const url = new URL((await client.logoutUrl('https://app.test')) as string);
+    expect(`${url.origin}${url.pathname}`).toBe(`${ISSUER}/oauth/logout`);
+    expect(url.searchParams.get('client_id')).toBe('client-abc');
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe('https://app.test');
+    expect(url.searchParams.get('id_token_hint')).toBeNull();
+
+    const bare = new URL((await client.logoutUrl()) as string);
+    expect(bare.searchParams.get('client_id')).toBe('client-abc');
+    expect(bare.searchParams.get('post_logout_redirect_uri')).toBeNull();
+  });
+
+  it('passes an id_token_hint when one is supplied', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    const client = new CboxIdClient(baseConfig);
+
+    const url = new URL((await client.logoutUrl('https://app.test', 'header.payload.sig')) as string);
+    expect(url.searchParams.get('id_token_hint')).toBe('header.payload.sig');
+    expect(url.searchParams.get('client_id')).toBe('client-abc');
   });
 });

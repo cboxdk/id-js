@@ -100,7 +100,9 @@ await client.revoke(user.refreshToken!, 'refresh_token');                // RFC 
 ```
 
 Revoking a refresh token drops the whole token family — that's what "sign out
-everywhere" needs. Both calls are confidential-client, so they require a `clientSecret`.
+everywhere" needs. `machineToken`, `introspect` and `revoke` authenticate as the
+client, so they require a `clientSecret`; `userinfo` authenticates with the user's
+own access token and does not.
 
 ## Verify webhooks
 

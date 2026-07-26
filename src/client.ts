@@ -29,6 +29,8 @@ export interface StoredAuthState {
   state: string;
   codeVerifier: string;
   nonce: string;
+  /** The `maxAge` this login demanded, if any. See {@link AuthorizationRequest.maxAge}. */
+  maxAge?: number;
 }
 
 /**
@@ -106,7 +108,15 @@ export class CboxIdClient {
     }
 
     const endpoint = await this.discovery.endpoint('authorization_endpoint');
-    return { url: `${endpoint}?${params.toString()}`, state, codeVerifier, nonce };
+    return {
+      url: `${endpoint}?${params.toString()}`,
+      state,
+      codeVerifier,
+      nonce,
+      // Carried through so authenticate() can hold the instance to it. Only present
+      // when requested (exactOptionalPropertyTypes).
+      ...(typeof options.maxAge === 'number' ? { maxAge: options.maxAge } : {}),
+    };
   }
 
   /**
@@ -145,7 +155,13 @@ export class CboxIdClient {
 
     let claims: Record<string, unknown> = {};
     if (tokens.id_token) {
-      claims = await this.verifyIdToken(tokens.id_token, stored.nonce);
+      claims = await this.verifyIdToken(tokens.id_token, stored.nonce, stored.maxAge);
+    } else if (typeof stored.maxAge === 'number') {
+      // No id_token means no auth_time, and therefore no evidence the demanded
+      // re-authentication happened. Accepting that silently is the whole defect.
+      throw new AuthenticationError(
+        'A max_age was requested but no id_token was returned, so the authentication age could not be verified.',
+      );
     }
     // Enrich with userinfo (email/name/org a minimal id_token may omit).
     claims = { ...claims, ...(await this.userinfo(tokens.access_token)) };
@@ -221,15 +237,30 @@ export class CboxIdClient {
     return returnTo ? `${base}?${new URLSearchParams({ return_to: returnTo }).toString()}` : base;
   }
 
-  /** The RP-initiated logout URL, or null when the instance advertises none. */
-  async logoutUrl(returnTo?: string): Promise<string | null> {
+  /**
+   * The RP-initiated logout URL, or null when the instance advertises none.
+   *
+   * `client_id` is always sent, even without a `returnTo`: the OP validates
+   * `post_logout_redirect_uri` against the registered allow-list of THAT client
+   * (OIDC RP-Initiated Logout 1.0 §2). With no way to name the RP the OP cannot
+   * check the list, so it silently drops the return URL and strands the user on a
+   * bare "you are signed out" page. `idTokenHint` — the user's `id_token`, if you
+   * still hold it — is the spec's other way to identify the RP, and additionally
+   * tells the OP which subject is logging out.
+   */
+  async logoutUrl(returnTo?: string, idTokenHint?: string): Promise<string | null> {
     const endpoint = await this.discovery.optionalEndpoint('end_session_endpoint');
     if (!endpoint) {
       return null;
     }
-    return returnTo
-      ? `${endpoint}?${new URLSearchParams({ post_logout_redirect_uri: returnTo }).toString()}`
-      : endpoint;
+    const params = new URLSearchParams({ client_id: this.config.clientId });
+    if (returnTo) {
+      params.set('post_logout_redirect_uri', returnTo);
+    }
+    if (idTokenHint) {
+      params.set('id_token_hint', idTokenHint);
+    }
+    return `${endpoint}?${params.toString()}`;
   }
 
   /**
@@ -349,7 +380,11 @@ export class CboxIdClient {
     return (await response.json()) as TokenResponse;
   }
 
-  private async verifyIdToken(idToken: string, nonce: string): Promise<Record<string, unknown>> {
+  private async verifyIdToken(
+    idToken: string,
+    nonce: string,
+    maxAge?: number,
+  ): Promise<Record<string, unknown>> {
     const jwksUri = await this.discovery.endpoint('jwks_uri');
     let resolver = this.jwksByUri.get(jwksUri);
     if (!resolver) {
@@ -373,6 +408,31 @@ export class CboxIdClient {
 
     if (nonce && payload['nonce'] !== nonce) {
       throw new AuthenticationError('The id_token nonce did not match — possible replay.');
+    }
+
+    // OIDC Core §3.1.3.7 step 12: when max_age was requested, `auth_time` is REQUIRED
+    // and the relying party MUST check it. `max_age` is the control you reach for
+    // before a payment or an admin grant, and the whole point is that the person
+    // authenticated JUST NOW — so a login({maxAge}) whose result is never checked is a
+    // step-up in name only: a day-old session comes back carrying its original
+    // auth_time and nothing anywhere says so.
+    if (typeof maxAge === 'number') {
+      const authTime = payload['auth_time'];
+
+      if (typeof authTime !== 'number') {
+        throw new AuthenticationError(
+          'A max_age was requested but the id_token carried no auth_time, so the authentication age could not be verified.',
+        );
+      }
+
+      const tolerance = this.config.authTimeToleranceSeconds ?? 60;
+      const age = Math.floor(Date.now() / 1000) - authTime;
+
+      if (age > maxAge + tolerance) {
+        throw new AuthenticationError(
+          `The authentication is ${age}s old but max_age required ${maxAge}s — the user did not re-authenticate.`,
+        );
+      }
     }
 
     return payload as Record<string, unknown>;
