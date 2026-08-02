@@ -445,7 +445,10 @@ export class CboxIdClient {
 
   private accountPath(): string {
     const path = this.config.accountPath;
-    return path && path !== '' ? `/${path.replace(/^\//, '')}` : '/settings';
+    // `/account`, not `/settings`. The latter is the organization-admin page: it
+    // redirects a non-admin to `/account` and drops `return_to` on the way, so a member
+    // following this link arrives at the right screen having lost where they came from.
+    return path && path !== '' ? `/${path.replace(/^\//, '')}` : '/account';
   }
 
   private requireSecret(): string {
