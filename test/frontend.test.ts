@@ -84,9 +84,13 @@ describe('CboxIdFrontend', () => {
       .mockRejectedValueOnce(new Error('network'))
       .mockResolvedValue(respond(CONFIG));
 
+    // `retries: 0` so the first call genuinely fails: with the default the client would
+    // retry past the single rejection and this would prove nothing. The property under
+    // test is that the REJECTION is not cached, not that failures are fatal.
     const frontend = new CboxIdFrontend({
       issuer: 'https://id.acme.test',
       publishableKey: 'pk_live_abc',
+      retries: 0,
       fetch: fetchImpl as unknown as typeof fetch,
     });
 
@@ -145,5 +149,83 @@ describe('CboxIdFrontend', () => {
 
     expect(live.isLive).toBe(true);
     expect(test.isLive).toBe(false);
+  });
+});
+
+describe('CboxIdFrontend — production behaviour', () => {
+  /**
+   * Retrying a refusal delays the developer finding out that their origin is not on the
+   * list, and hammering a rate limit makes it worse. Only the transient is retried.
+   */
+  it('retries a 5xx and gives up on a refusal', async () => {
+    const flaky = vi
+      .fn()
+      .mockResolvedValueOnce(respond({}, 503))
+      .mockResolvedValue(respond(CONFIG));
+
+    await expect(
+      new CboxIdFrontend({
+        issuer: 'https://id.acme.test',
+        publishableKey: 'pk_live_abc',
+        fetch: flaky as unknown as typeof fetch,
+      }).config(),
+    ).resolves.toMatchObject({ mode: 'live' });
+    expect(flaky).toHaveBeenCalledTimes(2);
+
+    const refused = vi.fn().mockResolvedValue(respond({}, 401));
+
+    await expect(
+      new CboxIdFrontend({
+        issuer: 'https://id.acme.test',
+        publishableKey: 'pk_live_abc',
+        fetch: refused as unknown as typeof fetch,
+      }).config(),
+    ).rejects.toMatchObject({ code: 'origin_not_allowed' });
+    expect(refused).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a rate limit as such, with the wait the server asked for', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response('{}', { status: 429, headers: { 'Retry-After': '30' } }),
+    );
+
+    await expect(
+      new CboxIdFrontend({
+        issuer: 'https://id.acme.test',
+        publishableKey: 'pk_live_abc',
+        fetch: fetchImpl as unknown as typeof fetch,
+      }).config(),
+    ).rejects.toMatchObject({ code: 'rate_limited', retryAfter: 30 });
+  });
+
+  /**
+   * A 200 whose body is not the document means something between the page and us is
+   * rewriting responses — a proxy, an extension, a captive portal. Surfaced as that,
+   * rather than as `undefined` deep inside somebody's component.
+   */
+  it('refuses a 200 that is not the document, and does not retry it', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ nonsense: true }));
+
+    await expect(
+      new CboxIdFrontend({
+        issuer: 'https://id.acme.test',
+        publishableKey: 'pk_live_abc',
+        fetch: fetchImpl as unknown as typeof fetch,
+      }).config(),
+    ).rejects.toMatchObject({ code: 'malformed' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an unreachable issuer as unavailable, naming the likely cause', async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await expect(
+      new CboxIdFrontend({
+        issuer: 'https://id.acme.test',
+        publishableKey: 'pk_live_abc',
+        retries: 0,
+        fetch: fetchImpl as unknown as typeof fetch,
+      }).config(),
+    ).rejects.toMatchObject({ code: 'unavailable' });
   });
 });

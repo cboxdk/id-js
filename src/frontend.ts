@@ -1,4 +1,4 @@
-import { ConfigurationError } from './errors.js';
+import { ConfigurationError, FrontendApiError } from './errors.js';
 
 /**
  * The browser-safe half of the SDK.
@@ -25,6 +25,14 @@ export interface FrontendClientOptions {
   publishableKey: string;
   /** Abort after this long. Defaults to 10s. */
   timeoutMs?: number;
+  /**
+   * How many times to retry a transient failure. Defaults to 2 (so three attempts).
+   *
+   * Only the network and 5xx are retried. A refusal is a configuration problem and
+   * retrying it just delays the developer finding out; a 429 is honoured rather than
+   * hammered.
+   */
+  retries?: number;
   /** Injectable for tests and for runtimes with a non-global fetch. */
   fetch?: typeof globalThis.fetch;
 }
@@ -81,6 +89,7 @@ export class CboxIdFrontend {
   private readonly issuer: string;
   private readonly publishableKey: string;
   private readonly timeoutMs: number;
+  private readonly retries: number;
   private readonly fetchImpl: typeof globalThis.fetch;
 
   /**
@@ -110,6 +119,7 @@ export class CboxIdFrontend {
     this.issuer = options.issuer.replace(/\/$/, '');
     this.publishableKey = options.publishableKey;
     this.timeoutMs = options.timeoutMs ?? 10_000;
+    this.retries = Math.max(0, options.retries ?? 2);
     this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
@@ -126,7 +136,7 @@ export class CboxIdFrontend {
    * rather than mid-session — which is the right trade for something that decides layout.
    */
   async config(): Promise<FrontendConfig> {
-    this.configPromise ??= this.get<FrontendConfig>('/frontend/v1/config').catch((error: unknown) => {
+    this.configPromise ??= this.get<FrontendConfig>('/frontend/v1/config', {}, isFrontendConfig).catch((error: unknown) => {
       // Cleared so a transient network failure does not poison the instance for the
       // lifetime of the page.
       this.configPromise = null;
@@ -150,17 +160,57 @@ export class CboxIdFrontend {
       return { user: null };
     }
 
-    return this.get<FrontendSession>('/frontend/v1/session', {
-      Authorization: `Bearer ${accessToken}`,
-    });
+    return this.get<FrontendSession>(
+      '/frontend/v1/session',
+      { Authorization: `Bearer ${accessToken}` },
+      isFrontendSession,
+    );
   }
 
-  private async get<T>(path: string, extraHeaders: Record<string, string> = {}): Promise<T> {
+  private async get<T>(
+    path: string,
+    extraHeaders: Record<string, string> = {},
+    validate?: (body: unknown) => body is T,
+  ): Promise<T> {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt <= this.retries; attempt++) {
+      // Linear, not exponential, and only between attempts. This sits inside a page
+      // render: a caller waiting on their sign-in box would rather fail in a second than
+      // succeed in eight.
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+      }
+
+      try {
+        return await this.attempt<T>(path, extraHeaders, validate);
+      } catch (error) {
+        lastError = error;
+
+        // Retry only what a retry can fix. A refusal is a configuration problem and
+        // retrying it delays the developer finding out; a rate limit is honoured rather
+        // than hammered; a malformed body will be malformed again.
+        if (!(error instanceof FrontendApiError) || error.code !== 'unavailable') {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
+  }
+
+  private async attempt<T>(
+    path: string,
+    extraHeaders: Record<string, string>,
+    validate?: (body: unknown) => body is T,
+  ): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
+    let response: Response;
+
     try {
-      const response = await this.fetchImpl(`${this.issuer}${path}`, {
+      response = await this.fetchImpl(`${this.issuer}${path}`, {
         headers: {
           // A header, never a query string: a query string puts the key in server logs,
           // in `Referer` on every outbound link, and in browser history.
@@ -170,19 +220,79 @@ export class CboxIdFrontend {
         },
         signal: controller.signal,
       });
-
-      if (!response.ok) {
-        // A refused request carries no CORS headers by design, so in a browser this
-        // usually surfaces as a network error before it ever reaches here. When it does
-        // reach here, the overwhelmingly likely cause is the one worth naming.
-        throw new ConfigurationError(
-          `Cbox ID refused the request (${response.status}). Check that this page's origin is on the key's allow-list, and that the key is not revoked.`,
-        );
-      }
-
-      return (await response.json()) as T;
+    } catch (cause) {
+      // Includes the abort on timeout, and — in a browser — a refusal, because a refused
+      // request deliberately carries no CORS headers and so never becomes a Response.
+      throw new FrontendApiError(
+        `Could not reach Cbox ID at ${this.issuer}. If this is a browser, check that this page's origin is on the key's allow-list — a refused request fails as a network error by design.`,
+        'unavailable',
+      );
     } finally {
       clearTimeout(timer);
     }
+
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get('Retry-After') ?? '');
+
+      throw new FrontendApiError(
+        'Cbox ID is rate limiting this key.',
+        'rate_limited',
+        429,
+        Number.isFinite(retryAfter) ? retryAfter : undefined,
+      );
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new FrontendApiError(
+        `Cbox ID refused the request (${response.status}). Check that this page's origin is on the key's allow-list, and that the key is not revoked.`,
+        'origin_not_allowed',
+        response.status,
+      );
+    }
+
+    if (!response.ok) {
+      throw new FrontendApiError(
+        `Cbox ID returned ${response.status}.`,
+        'unavailable',
+        response.status,
+      );
+    }
+
+    let body: unknown;
+
+    try {
+      body = await response.json();
+    } catch {
+      throw new FrontendApiError('Cbox ID returned a body that is not JSON.', 'malformed', response.status);
+    }
+
+    // A 200 whose body is not the document we expect means something between the page and
+    // us is rewriting responses — a proxy, an extension, a captive portal. Caught here so
+    // it surfaces as that, rather than as `undefined` deep inside somebody's component.
+    if (validate && !validate(body)) {
+      throw new FrontendApiError(
+        'Cbox ID returned a body that is not the expected document.',
+        'malformed',
+        response.status,
+      );
+    }
+
+    return body as T;
   }
+}
+
+/** The shape check for the config document. Structural, not exhaustive. */
+function isFrontendConfig(body: unknown): body is FrontendConfig {
+  if (typeof body !== 'object' || body === null) {
+    return false;
+  }
+
+  const doc = body as Partial<FrontendConfig>;
+
+  return typeof doc.issuer === 'string' && typeof doc.endpoints === 'object' && doc.endpoints !== null;
+}
+
+/** The shape check for the session document. `user: null` is valid and expected. */
+function isFrontendSession(body: unknown): body is FrontendSession {
+  return typeof body === 'object' && body !== null && 'user' in body;
 }

@@ -126,6 +126,26 @@ The publishable key grants nothing on its own: the access token is the entire au
 `session()`. Pasting a client secret here throws immediately rather than failing later as an
 opaque 401.
 
+Failures are typed, because the four ways this goes wrong need four different responses and
+telling them apart from a message string breaks the moment somebody rewords it:
+
+```ts
+import { FrontendApiError } from '@cboxdk/id-js'
+
+try {
+  await frontend.config()
+} catch (e) {
+  if (e instanceof FrontendApiError) {
+    e.code // 'origin_not_allowed' | 'rate_limited' | 'unavailable' | 'malformed'
+    e.retryAfter // seconds, when the server said
+  }
+}
+```
+
+Transient failures are retried twice by default (`retries`). A refusal is not — it is a
+configuration problem, and retrying it only delays you finding out. A rate limit is
+surfaced rather than hammered.
+
 ## Back-channel calls
 
 ```ts

@@ -1,4 +1,5 @@
 export { CboxIdFrontend } from './frontend.js';
+export { FrontendApiError } from './errors.js';
 export type {
   FrontendClientOptions,
   FrontendConfig,
