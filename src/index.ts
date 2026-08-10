@@ -1,3 +1,11 @@
+export { CboxIdFrontend } from './frontend.js';
+export type {
+  FrontendClientOptions,
+  FrontendConfig,
+  FrontendSession,
+  SocialProvider,
+  Appearance,
+} from './frontend.js';
 export { CboxIdClient } from './client.js';
 export type { CallbackParams, StoredAuthState } from './client.js';
 export { verifyWebhook } from './webhook.js';

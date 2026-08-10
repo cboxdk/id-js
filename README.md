@@ -90,6 +90,42 @@ const user = await client.authenticate({
 });
 ```
 
+## In the browser (publishable keys)
+
+Everything above needs a server: it holds your client secret. A **publishable key** is the
+opposite — it is public on purpose, it ships in your bundle, and it lets a page read its
+own sign-in configuration without routing that through your backend.
+
+```ts
+import { CboxIdFrontend } from '@cboxdk/id-js'
+
+const frontend = new CboxIdFrontend({
+  issuer: 'https://id.acme.com',
+  publishableKey: 'pk_live_…', // safe in your bundle
+})
+
+const config = await frontend.config()
+// → endpoints, social buttons, and the customer's theme
+
+const { user } = await frontend.session(accessToken)
+// → { id, email, name } or null
+```
+
+**What makes a public key safe:** every key carries an allow-list of origins, and a request
+from anywhere else is refused. A key that leaks still only works from the sites you
+registered — the same shape as a Stripe publishable key plus registered domains. Add your
+origins when you create the key in the console; exact matches only, so `https://acme.com`
+does not cover `https://www.acme.com`.
+
+`config()` is fetched once per instance and shared between however many components ask for
+it at the same time. `session()` returns `{ user: null }` rather than throwing when nobody
+is signed in — signed-out is a state, not an error, and a user button renders on pages
+nobody has signed in on.
+
+The publishable key grants nothing on its own: the access token is the entire authority for
+`session()`. Pasting a client secret here throws immediately rather than failing later as an
+opaque 401.
+
 ## Back-channel calls
 
 ```ts
