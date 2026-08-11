@@ -170,6 +170,20 @@ The other outcomes are `mfa_required`, `otp_required` and `sso_required`. That l
 matters: showing "wrong password" to somebody whose organization mandates SSO sends them to
 support instead of to their identity provider.
 
+For the first two, finish with the code:
+
+```ts
+if (result.status === 'mfa_required') {
+  const done = await frontend.submitSecondFactor(result.mfaToken, code)
+  // done.status === 'ok' → spend done.loginTicket exactly as above
+}
+```
+
+The `mfaToken` carries the pending state, because a cross-origin page has no session cookie
+to carry it in. A TOTP code or a recovery code both work — an embedded form that could not
+accept a recovery code would strand exactly the people that escape hatch exists for. A wrong
+code costs an attempt, not the sign-in: five are allowed before the token dies.
+
 **Present every refusal identically.** `invalid` covers a wrong password, an unknown address
 and a locked account — the server refuses to distinguish them, because that is the
 enumeration oracle, and a UI that distinguishes them rebuilds it.

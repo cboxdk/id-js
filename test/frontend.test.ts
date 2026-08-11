@@ -267,8 +267,8 @@ describe('CboxIdFrontend — embedded sign-in', () => {
   });
 
   it('reports each next step the server names', async () => {
-    for (const status of ['mfa_required', 'otp_required', 'sso_required'] as const) {
-      const fetchImpl = vi.fn().mockResolvedValue(respond({ status }));
+    for (const status of ['mfa_required', 'otp_required'] as const) {
+      const fetchImpl = vi.fn().mockResolvedValue(respond({ status, mfa_token: 'mt_abc' }));
 
       const result = await new CboxIdFrontend({
         issuer: 'https://id.acme.test',
@@ -278,6 +278,35 @@ describe('CboxIdFrontend — embedded sign-in', () => {
 
       expect(result.status).toBe(status);
     }
+
+    const sso = vi.fn().mockResolvedValue(respond({ status: 'sso_required' }));
+
+    expect(
+      (
+        await new CboxIdFrontend({
+          issuer: 'https://id.acme.test',
+          publishableKey: 'pk_live_abc',
+          fetch: sso as unknown as typeof fetch,
+        }).signIn('ada@acme.test', 'pw')
+      ).status,
+    ).toBe('sso_required');
+  });
+
+  /**
+   * A challenge with no token to answer it with is not a challenge — the page would draw a
+   * code field it can never submit. Treated as a refusal rather than passed through as a
+   * state the caller cannot act on.
+   */
+  it('treats a challenge with no pending token as a refusal', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'mfa_required' }));
+
+    const result = await new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as unknown as typeof fetch,
+    }).signIn('ada@acme.test', 'pw');
+
+    expect(result).toEqual({ status: 'invalid' });
   });
 
   /**
@@ -311,5 +340,61 @@ describe('CboxIdFrontend — embedded sign-in', () => {
     }).signIn('ada@acme.test', 'pw');
 
     expect(result).toEqual({ status: 'rate_limited', retryAfter: 30 });
+  });
+});
+
+describe('CboxIdFrontend — second factor', () => {
+  function client(fetchImpl: unknown) {
+    return new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as typeof fetch,
+    });
+  }
+
+  /**
+   * The pending state travels as a token because a cross-origin page has no session cookie
+   * to carry it in. Losing it between the two calls is losing the sign-in.
+   */
+  it('carries the pending token out of the first call', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'mfa_required', mfa_token: 'mt_abc' }));
+
+    const result = await client(fetchImpl).signIn('ada@acme.test', 'pw');
+
+    expect(result).toEqual({ status: 'mfa_required', mfaToken: 'mt_abc' });
+  });
+
+  it('exchanges a code for a login ticket', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'ok', login_ticket: 'lt_abc', expires_in: 60 }));
+
+    const result = await client(fetchImpl).submitSecondFactor('mt_abc', '123456');
+
+    expect(result).toEqual({ status: 'ok', loginTicket: 'lt_abc', expiresIn: 60 });
+
+    const [, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(JSON.parse(init.body)).toEqual({ mfa_token: 'mt_abc', code: '123456', method: 'mfa' });
+  });
+
+  it('sends the emailed-code challenge as its own method', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'ok', login_ticket: 'lt', expires_in: 60 }));
+
+    await client(fetchImpl).submitSecondFactor('mt_abc', '123456', 'otp');
+
+    const [, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(JSON.parse(init.body).method).toBe('otp');
+  });
+
+  it('reports a wrong code as invalid rather than throwing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'invalid' }, 401));
+
+    await expect(client(fetchImpl).submitSecondFactor('mt_abc', '000000')).resolves.toEqual({ status: 'invalid' });
+  });
+
+  it('never leaks a token-shaped field out of the second factor either', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'ok', login_ticket: 'lt', access_token: 'nope' }));
+
+    const result = await client(fetchImpl).submitSecondFactor('mt_abc', '123456');
+
+    expect(JSON.stringify(result)).not.toContain('access_token');
   });
 });

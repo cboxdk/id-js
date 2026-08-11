@@ -70,8 +70,8 @@ export interface FrontendConfig {
 /** What a sign-in attempt produced. */
 export type SignInResult =
   | { status: 'ok'; loginTicket: string; expiresIn: number }
-  | { status: 'mfa_required' }
-  | { status: 'otp_required' }
+  | { status: 'mfa_required'; mfaToken: string }
+  | { status: 'otp_required'; mfaToken: string }
   | { status: 'sso_required' }
   | { status: 'invalid' }
   | { status: 'rate_limited'; retryAfter: number | undefined };
@@ -211,7 +211,7 @@ export class CboxIdFrontend {
       return { status: 'rate_limited', retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined };
     }
 
-    let body: { status?: string; login_ticket?: string; expires_in?: number };
+    let body: { status?: string; login_ticket?: string; mfa_token?: string; expires_in?: number };
 
     try {
       body = (await response.json()) as typeof body;
@@ -223,14 +223,42 @@ export class CboxIdFrontend {
       return { status: 'ok', loginTicket: body.login_ticket, expiresIn: body.expires_in ?? 60 };
     }
 
-    switch (body.status) {
-      case 'mfa_required':
-      case 'otp_required':
-      case 'sso_required':
-        return { status: body.status };
-      default:
-        return { status: 'invalid' };
+    if ((body.status === 'mfa_required' || body.status === 'otp_required') && typeof body.mfa_token === 'string') {
+      return { status: body.status, mfaToken: body.mfa_token };
     }
+
+    if (body.status === 'sso_required') {
+      return { status: 'sso_required' };
+    }
+
+    return { status: 'invalid' };
+  }
+
+  /**
+   * Finish a sign-in that owed a second factor.
+   *
+   * The token from `signIn()` carries the pending state, because a cross-origin page has
+   * no session cookie to carry it in. A TOTP code or a recovery code both work — an
+   * embedded form that could not accept a recovery code would strand exactly the people
+   * that escape hatch exists for.
+   *
+   * A wrong code costs an attempt, not the sign-in: five are allowed before the token
+   * dies and the person starts from the password again.
+   */
+  async submitSecondFactor(mfaToken: string, code: string, method: 'mfa' | 'otp' = 'mfa'): Promise<SignInResult> {
+    const response = await this.post('/frontend/v1/sign-in/factor', { mfa_token: mfaToken, code, method });
+
+    let body: { status?: string; login_ticket?: string; expires_in?: number };
+
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      throw new FrontendApiError('Cbox ID returned a body that is not JSON.', 'malformed', response.status);
+    }
+
+    return body.status === 'ok' && typeof body.login_ticket === 'string'
+      ? { status: 'ok', loginTicket: body.login_ticket, expiresIn: body.expires_in ?? 60 }
+      : { status: 'invalid' };
   }
 
   private async post(path: string, payload: Record<string, unknown>): Promise<Response> {
