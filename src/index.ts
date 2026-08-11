@@ -1,3 +1,5 @@
+export { createLegacyVerifier } from './legacy.js';
+export type { LegacyUser, LegacyVerifierOptions } from './legacy.js';
 export { CboxIdFrontend } from './frontend.js';
 export { FrontendApiError } from './errors.js';
 export type {

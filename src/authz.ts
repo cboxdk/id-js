@@ -29,6 +29,28 @@ export interface RoleDefinition {
 export interface AuthzDeclaration {
   permissions?: PermissionDefinition[];
   roles?: RoleDefinition[];
+  /**
+   * Where this app's OLD login lives, while you are migrating off it.
+   *
+   * Declared here for the same reason roles are: it is a fact about the app, it belongs
+   * with the deploy, and the alternative is a URL pasted into a console and a secret
+   * pasted into an env file that quietly disagree six weeks later.
+   *
+   * IT DOES NOT TAKE EFFECT ON ITS OWN. Unlike a role — which affects only the app that
+   * declared it — this names a URL that every unknown email and the password typed with
+   * it will be offered to, on the environment's whole sign-in path. So it arrives as a
+   * proposal and an operator has to approve it in the console. Changing the url later
+   * drops that approval, on purpose.
+   */
+  legacyLogin?: LegacyLoginDeclaration;
+}
+
+/** Where an app's old login lives. See {@link AuthzDeclaration.legacyLogin}. */
+export interface LegacyLoginDeclaration {
+  /** Must be https — a password in the clear is readable by everything on the path. */
+  url: string;
+  /** At least 32 characters. It is the only thing proving a request came from Cbox ID. */
+  secret: string;
 }
 
 /**
@@ -39,6 +61,7 @@ export interface AuthzManifest {
   version: string;
   permissions: PermissionDefinition[];
   roles: RoleDefinition[];
+  legacy_login?: LegacyLoginDeclaration;
 }
 
 /** What {@link publishManifest} needs to authenticate the push. */
@@ -74,11 +97,23 @@ export interface ManifestSyncSummary {
  * @throws ConfigurationError on a missing key/name, a duplicate, or a role that
  *   references a permission that was never declared.
  */
-export function defineAuthz(declaration: AuthzDeclaration): Required<AuthzDeclaration> {
+export function defineAuthz(
+  declaration: AuthzDeclaration,
+): AuthzDeclaration & { permissions: PermissionDefinition[]; roles: RoleDefinition[] } {
   const permissions = declaration.permissions ?? [];
   const roles = declaration.roles ?? [];
   assertDeclaration(permissions, roles);
-  return { permissions, roles };
+
+  // The legacy login is validated here too, so a bad one fails in the deploy that
+  // introduced it rather than as a 4xx from a manifest push somebody has to go and read.
+  if (declaration.legacyLogin) {
+    assertLegacyLogin(declaration.legacyLogin);
+  }
+
+  // `Required<>` no longer fits: the catalog is always present after this, and the legacy
+  // login legitimately is not. Returning the declaration's own optionality keeps a caller
+  // from having to invent an empty one.
+  return { ...declaration, permissions, roles };
 }
 
 /**
@@ -94,8 +129,20 @@ export async function buildManifest(declaration: AuthzDeclaration): Promise<Auth
   permissions.sort((a, b) => byteCompare(a.key, b.key));
   roles.sort((a, b) => byteCompare(a.key, b.key));
 
+  // The version hashes the CATALOG only, and the legacy login is deliberately outside it:
+  // this canonicalization is a cross-SDK contract — id-js, id-python, id-go and the PHP
+  // reference all produce the same bytes, and a shared fixture exists to keep them from
+  // drifting. The server compares a declared url separately for the same reason.
   const version = (await sha256Hex(canonicalManifestJson(permissions, roles))).slice(0, 16);
-  return { version, permissions, roles };
+
+  const manifest: AuthzManifest = { version, permissions, roles };
+
+  if (declaration.legacyLogin) {
+    assertLegacyLogin(declaration.legacyLogin);
+    manifest.legacy_login = declaration.legacyLogin;
+  }
+
+  return manifest;
 }
 
 /**
@@ -293,5 +340,24 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * Refuse a legacy login declaration the server would refuse anyway.
+ *
+ * Checked in the SDK so it fails at build time, in the deploy that introduced it, rather
+ * than as a 4xx from a manifest push somebody has to go and read. Both rules are the
+ * server's and are restated here rather than inferred: https because a password in the
+ * clear is readable by everything on the path, and a real secret because it is the only
+ * thing proving a request came from Cbox ID.
+ */
+function assertLegacyLogin(legacy: LegacyLoginDeclaration): void {
+  if (!legacy.url.startsWith('https://')) {
+    throw new ConfigurationError('legacyLogin.url must be https — a password must never cross the network in the clear.');
+  }
+
+  if (!legacy.secret || legacy.secret.length < 32) {
+    throw new ConfigurationError('legacyLogin.secret must be at least 32 characters; it is what proves a request came from Cbox ID.');
   }
 }

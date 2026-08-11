@@ -160,6 +160,59 @@ everywhere" needs. `machineToken`, `introspect` and `revoke` authenticate as the
 client, so they require a `clientSecret`; `userinfo` authenticates with the user's
 own access token and does not.
 
+## Migrating off an old login
+
+Bulk-importing users with their existing hashes is the first answer, and the better one.
+When you cannot export those hashes, Cbox ID can ask your old system instead — and import
+each person at the moment they sign in.
+
+Declare where it lives, alongside your roles:
+
+```ts
+export default defineAuthz({
+  roles: [...],
+  legacyLogin: {
+    url: 'https://acme.com/api/cbox-legacy',
+    secret: process.env.CBOX_LEGACY_SECRET!, // 32+ chars
+  },
+})
+```
+
+It rides the manifest because it is the same kind of fact as a role — something your app
+knows about itself, deployed with the code. **It does not take effect on its own:** unlike
+a role, this names a URL that every unknown email and the password typed with it will be
+offered to, so an operator approves it once in the console. Changing the URL later drops
+that approval, deliberately.
+
+Then write the handler — one function, no signature code:
+
+```ts
+// app/api/cbox-legacy/route.ts
+import { createLegacyVerifier } from '@cboxdk/id-js'
+
+export const POST = createLegacyVerifier({
+  secret: process.env.CBOX_LEGACY_SECRET!,
+  async verify(email, password) {
+    const row = await db.users.findByEmail(email)
+    if (!row || !(await argon2.verify(row.password, password))) return null
+
+    return { email: row.email, name: row.name, emailVerified: !!row.confirmedAt }
+  },
+})
+```
+
+The factory owns the HMAC check, the freshness window, the constant-time compare and the
+response shape — the parts that are easy to get subtly wrong. You own the one function
+that knows your database.
+
+Return `null` for "wrong password". **Throwing is different:** it means your store could
+not decide, and is answered with a 503 so Cbox ID refuses the sign-in rather than reading
+an outage as a bad password. Returning `passwordHash` lets the person keep their password
+verbatim; omit it and Cbox ID hashes the one they just proved they know.
+
+It returns a `Request → Response` handler, so it drops into Next.js route handlers, Remix,
+Hono, Bun and Deno unchanged.
+
 ## Verify webhooks
 
 ```ts
