@@ -229,3 +229,87 @@ describe('CboxIdFrontend — production behaviour', () => {
     ).rejects.toMatchObject({ code: 'unavailable' });
   });
 });
+
+describe('CboxIdFrontend — embedded sign-in', () => {
+  /**
+   * Handing tokens to a page that proved a password is the implicit grant, which OAuth 2.1
+   * removes. The ticket is the whole point of the design, and nothing token-shaped may
+   * ever come back here.
+   */
+  it('returns a ticket and never anything token-shaped', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'ok', login_ticket: 'lt_abc', expires_in: 60 }));
+
+    const result = await new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as unknown as typeof fetch,
+    }).signIn('ada@acme.test', 'pw');
+
+    expect(result).toEqual({ status: 'ok', loginTicket: 'lt_abc', expiresIn: 60 });
+    expect(JSON.stringify(result)).not.toMatch(/access_token|id_token|refresh_token/);
+  });
+
+  it('posts the credentials rather than putting them in a URL', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'invalid' }, 401));
+
+    await new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as unknown as typeof fetch,
+    }).signIn('ada@acme.test', 'pw');
+
+    const [url, init] = fetchImpl.mock.calls[0] ?? [];
+
+    expect(url).toBe('https://id.acme.test/frontend/v1/sign-in');
+    expect(init.method).toBe('POST');
+    // A password in a query string reaches server logs, Referer and browser history.
+    expect(String(url)).not.toContain('pw');
+  });
+
+  it('reports each next step the server names', async () => {
+    for (const status of ['mfa_required', 'otp_required', 'sso_required'] as const) {
+      const fetchImpl = vi.fn().mockResolvedValue(respond({ status }));
+
+      const result = await new CboxIdFrontend({
+        issuer: 'https://id.acme.test',
+        publishableKey: 'pk_live_abc',
+        fetch: fetchImpl as unknown as typeof fetch,
+      }).signIn('ada@acme.test', 'pw');
+
+      expect(result.status).toBe(status);
+    }
+  });
+
+  /**
+   * Every refusal is the same refusal — a wrong password, an unknown address and a locked
+   * account are one answer, because distinguishing them is the enumeration oracle.
+   */
+  it('collapses every refusal into one status', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'invalid' }, 401));
+
+    const result = await new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as unknown as typeof fetch,
+    }).signIn('nobody@acme.test', 'pw');
+
+    expect(result).toEqual({ status: 'invalid' });
+  });
+
+  it('surfaces a rate limit with the wait the server asked for', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'rate_limited' }), {
+        status: 429,
+        headers: { 'Retry-After': '30', 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const result = await new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as unknown as typeof fetch,
+    }).signIn('ada@acme.test', 'pw');
+
+    expect(result).toEqual({ status: 'rate_limited', retryAfter: 30 });
+  });
+});

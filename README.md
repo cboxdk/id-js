@@ -146,6 +146,34 @@ Transient failures are retried twice by default (`retries`). A refusal is not �
 configuration problem, and retrying it only delays you finding out. A rate limit is
 surfaced rather than hammered.
 
+### Signing in from your own form
+
+```ts
+const result = await frontend.signIn(email, password)
+
+if (result.status === 'ok') {
+  // Spend the ticket on the ordinary authorize flow, with your own PKCE challenge.
+  window.location.href = `${config.endpoints.authorization}?${new URLSearchParams({
+    client_id, redirect_uri, response_type: 'code',
+    code_challenge, code_challenge_method: 'S256',
+    login_ticket: result.loginTicket,
+  })}`
+}
+```
+
+**You get a ticket, never a token.** Handing tokens to a page that proved a password is the
+implicit grant, which OAuth 2.1 removes: tokens in a URL, in history, in `Referer`, with no
+client authentication and no PKCE binding. The ticket is single-use, lasts sixty seconds,
+and is for one redirect — not for storing.
+
+The other outcomes are `mfa_required`, `otp_required` and `sso_required`. That last one
+matters: showing "wrong password" to somebody whose organization mandates SSO sends them to
+support instead of to their identity provider.
+
+**Present every refusal identically.** `invalid` covers a wrong password, an unknown address
+and a locked account — the server refuses to distinguish them, because that is the
+enumeration oracle, and a UI that distinguishes them rebuilds it.
+
 ## Back-channel calls
 
 ```ts

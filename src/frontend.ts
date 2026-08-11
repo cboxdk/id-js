@@ -67,6 +67,15 @@ export interface FrontendConfig {
   appearance?: Appearance;
 }
 
+/** What a sign-in attempt produced. */
+export type SignInResult =
+  | { status: 'ok'; loginTicket: string; expiresIn: number }
+  | { status: 'mfa_required' }
+  | { status: 'otp_required' }
+  | { status: 'sso_required' }
+  | { status: 'invalid' }
+  | { status: 'rate_limited'; retryAfter: number | undefined };
+
 /** Who the browser is signed in as, or nobody. */
 export interface FrontendSession {
   user: { id: string; email: string; name: string | null } | null;
@@ -165,6 +174,88 @@ export class CboxIdFrontend {
       { Authorization: `Bearer ${accessToken}` },
       isFrontendSession,
     );
+  }
+
+  /**
+   * Sign in with a password, from a form your page drew.
+   *
+   * WHAT COMES BACK IS A TICKET, NEVER A TOKEN. Handing tokens to a page that proved a
+   * password is the implicit grant, which OAuth 2.1 removes: tokens in a URL, in history,
+   * in `Referer`, with no client authentication and no PKCE binding. Spend the ticket by
+   * sending the browser to `/oauth/authorize` with your own PKCE challenge and
+   * `login_ticket` in the query — the ordinary flow, which then issues an ordinary code.
+   *
+   * It expires in sixty seconds. It is for one redirect, not for storing.
+   *
+   * ```ts
+   * const result = await frontend.signIn(email, password)
+   *
+   * if (result.status === 'ok') {
+   *   window.location.href = `${config.endpoints.authorization}?${new URLSearchParams({
+   *     client_id, redirect_uri, response_type: 'code', code_challenge, code_challenge_method: 'S256',
+   *     login_ticket: result.loginTicket,
+   *   })}`
+   * }
+   * ```
+   *
+   * EVERY REFUSAL IS THE SAME REFUSAL. `invalid` covers a wrong password, an unknown
+   * address and a locked account, because distinguishing them is the enumeration oracle
+   * the server refuses to build — do not present them differently in your UI either.
+   */
+  async signIn(email: string, password: string): Promise<SignInResult> {
+    const response = await this.post('/frontend/v1/sign-in', { email, password });
+
+    if (response.status === 429) {
+      const retryAfter = Number(response.headers.get('Retry-After') ?? '');
+
+      return { status: 'rate_limited', retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined };
+    }
+
+    let body: { status?: string; login_ticket?: string; expires_in?: number };
+
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      throw new FrontendApiError('Cbox ID returned a body that is not JSON.', 'malformed', response.status);
+    }
+
+    if (body.status === 'ok' && typeof body.login_ticket === 'string') {
+      return { status: 'ok', loginTicket: body.login_ticket, expiresIn: body.expires_in ?? 60 };
+    }
+
+    switch (body.status) {
+      case 'mfa_required':
+      case 'otp_required':
+      case 'sso_required':
+        return { status: body.status };
+      default:
+        return { status: 'invalid' };
+    }
+  }
+
+  private async post(path: string, payload: Record<string, unknown>): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      return await this.fetchImpl(`${this.issuer}${path}`, {
+        method: 'POST',
+        headers: {
+          'X-Cbox-Publishable-Key': this.publishableKey,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } catch {
+      throw new FrontendApiError(
+        `Could not reach Cbox ID at ${this.issuer}. If this is a browser, check that this page's origin is on the key's allow-list — a refused request fails as a network error by design.`,
+        'unavailable',
+      );
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async get<T>(

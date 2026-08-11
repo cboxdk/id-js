@@ -8,6 +8,7 @@ export type {
   FrontendSession,
   SocialProvider,
   Appearance,
+  SignInResult,
 } from './frontend.js';
 export { CboxIdClient } from './client.js';
 export type { CallbackParams, StoredAuthState } from './client.js';
