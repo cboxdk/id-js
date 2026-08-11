@@ -179,6 +179,28 @@ if (result.status === 'mfa_required') {
 }
 ```
 
+### Passkeys
+
+```ts
+const options = await frontend.passkeyOptions()
+
+const assertion = await navigator.credentials.get({
+  publicKey: { ...options, challenge: decode(options.challenge) },
+})
+
+const result = await frontend.signInWithPasskey(options.challenge_token, serialise(assertion))
+```
+
+The `challenge_token` carries the challenge between the two requests WebAuthn needs, in
+place of the session cookie a cross-origin page does not have. It is single-use.
+
+**The relying party is the issuer's, not your page's.** WebAuthn binds an assertion to the
+origin that asked for it — that is what makes a passkey phishing-resistant — so an embedded
+button on `acme.com` still authenticates against the issuer's `rpId`. If your page is on a
+different registrable domain from your Cbox ID issuer, passkeys need the hosted page or a
+subdomain of the issuer. That is WebAuthn working as designed rather than a limitation to
+route around, and it is the first thing that surprises people.
+
 The `mfaToken` carries the pending state, because a cross-origin page has no session cookie
 to carry it in. A TOTP code or a recovery code both work — an embedded form that could not
 accept a recovery code would strand exactly the people that escape hatch exists for. A wrong

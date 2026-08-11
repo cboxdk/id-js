@@ -398,3 +398,56 @@ describe('CboxIdFrontend — second factor', () => {
     expect(JSON.stringify(result)).not.toContain('access_token');
   });
 });
+
+describe('CboxIdFrontend — passkeys', () => {
+  function client(fetchImpl: unknown) {
+    return new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as typeof fetch,
+    });
+  }
+
+  it('asks for options and carries the handle back', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      respond({ challenge: 'c', challenge_token: 'h_abc', rpId: 'id.acme.test', allowCredentials: [] }),
+    );
+
+    const options = await client(fetchImpl).passkeyOptions();
+
+    expect(options.challenge_token).toBe('h_abc');
+    // Discoverable credentials: the page never says who is signing in.
+    expect(options.allowCredentials).toEqual([]);
+  });
+
+  /**
+   * The server verifies the RAW body, so the assertion travels unchanged — rebuilding it
+   * would change the bytes and every valid signature would be refused.
+   */
+  it('sends the assertion through unchanged, with the handle beside it', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'ok', login_ticket: 'lt', expires_in: 60 }));
+
+    await client(fetchImpl).signInWithPasskey('h_abc', { id: 'cred-1', response: { signature: 'sig' } });
+
+    const [, init] = fetchImpl.mock.calls[0] ?? [];
+    const sent = JSON.parse(init.body);
+
+    expect(sent.id).toBe('cred-1');
+    expect(sent.response.signature).toBe('sig');
+    expect(sent.challenge_token).toBe('h_abc');
+  });
+
+  it('returns a login ticket, the same as every other route in', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'ok', login_ticket: 'lt_abc', expires_in: 60 }));
+
+    const result = await client(fetchImpl).signInWithPasskey('h_abc', { id: 'cred-1' });
+
+    expect(result).toEqual({ status: 'ok', loginTicket: 'lt_abc', expiresIn: 60 });
+  });
+
+  it('reports a refused assertion as invalid rather than throwing', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'invalid' }, 401));
+
+    await expect(client(fetchImpl).signInWithPasskey('h_abc', { id: 'cred-1' })).resolves.toEqual({ status: 'invalid' });
+  });
+});

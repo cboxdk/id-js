@@ -9,6 +9,7 @@ export type {
   SocialProvider,
   Appearance,
   SignInResult,
+  PasskeyOptions,
 } from './frontend.js';
 export { CboxIdClient } from './client.js';
 export type { CallbackParams, StoredAuthState } from './client.js';

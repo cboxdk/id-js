@@ -76,6 +76,17 @@ export type SignInResult =
   | { status: 'invalid' }
   | { status: 'rate_limited'; retryAfter: number | undefined };
 
+/** What a browser needs to ask an authenticator for a passkey assertion. */
+export interface PasskeyOptions {
+  challenge: string;
+  /** Carries the challenge to the second request, in place of a session cookie. */
+  challenge_token: string;
+  rpId: string;
+  userVerification: string;
+  allowCredentials: unknown[];
+  timeout: number;
+}
+
 /** Who the browser is signed in as, or nobody. */
 export interface FrontendSession {
   user: { id: string; email: string; name: string | null } | null;
@@ -247,6 +258,54 @@ export class CboxIdFrontend {
    */
   async submitSecondFactor(mfaToken: string, code: string, method: 'mfa' | 'otp' = 'mfa'): Promise<SignInResult> {
     const response = await this.post('/frontend/v1/sign-in/factor', { mfa_token: mfaToken, code, method });
+
+    let body: { status?: string; login_ticket?: string; expires_in?: number };
+
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      throw new FrontendApiError('Cbox ID returned a body that is not JSON.', 'malformed', response.status);
+    }
+
+    return body.status === 'ok' && typeof body.login_ticket === 'string'
+      ? { status: 'ok', loginTicket: body.login_ticket, expiresIn: body.expires_in ?? 60 }
+      : { status: 'invalid' };
+  }
+
+  /**
+   * The WebAuthn options for a passkey sign-in, and the handle that carries the challenge.
+   *
+   * The handle exists because a cross-origin page has no session cookie to keep the
+   * challenge in between the two requests WebAuthn needs. Pass it back to
+   * {@link signInWithPasskey} with whatever `navigator.credentials.get()` returns.
+   *
+   * `allowCredentials` comes back empty on purpose: this is a discoverable-credential
+   * flow, so the authenticator offers whichever passkey it holds and the page never has to
+   * say who is signing in — asking for an email first, to look up which credentials exist,
+   * would be an enumeration oracle.
+   */
+  async passkeyOptions(): Promise<PasskeyOptions> {
+    const response = await this.post('/frontend/v1/sign-in/passkey/options', {});
+
+    if (!response.ok) {
+      throw new FrontendApiError(
+        `Cbox ID refused the request (${response.status}). Check that this page's origin is on the key's allow-list.`,
+        'origin_not_allowed',
+        response.status,
+      );
+    }
+
+    return (await response.json()) as PasskeyOptions;
+  }
+
+  /**
+   * Complete a passkey sign-in with the assertion the authenticator produced.
+   *
+   * `assertion` is the credential from `navigator.credentials.get()`, serialised — the
+   * server verifies the raw body, so pass it through unchanged rather than rebuilding it.
+   */
+  async signInWithPasskey(challengeToken: string, assertion: Record<string, unknown>): Promise<SignInResult> {
+    const response = await this.post('/frontend/v1/sign-in/passkey', { ...assertion, challenge_token: challengeToken });
 
     let body: { status?: string; login_ticket?: string; expires_in?: number };
 
