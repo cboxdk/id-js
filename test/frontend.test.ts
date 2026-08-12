@@ -451,3 +451,36 @@ describe('CboxIdFrontend — passkeys', () => {
     await expect(client(fetchImpl).signInWithPasskey('h_abc', { id: 'cred-1' })).resolves.toEqual({ status: 'invalid' });
   });
 });
+
+/**
+ * THE SERVER ANSWERS PRECISELY, and this client used to throw that away.
+ *
+ * "No publishable key was presented" is a different problem from "That publishable key
+ * cannot be used from this origin" — one is a wiring mistake, the other an allow-list — and
+ * substituting a generic guess for both made the SDK less useful than the API it wraps.
+ */
+describe('the reason the server gave', () => {
+  it('is preferred over our own guess', async () => {
+    const frontend = new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_test_abc',
+      fetch: async () =>
+        new Response(JSON.stringify({ error: 'missing_key', error_description: 'No publishable key was presented.' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+
+    await expect(frontend.config()).rejects.toThrow(/No publishable key was presented/);
+  });
+
+  it('falls back when the refusal carries no readable body, which is the browser case', async () => {
+    const frontend = new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_test_abc',
+      fetch: async () => new Response('', { status: 403 }),
+    });
+
+    await expect(frontend.config()).rejects.toThrow(/allow-list/);
+  });
+});

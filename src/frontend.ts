@@ -413,7 +413,7 @@ export class CboxIdFrontend {
       const retryAfter = Number(response.headers.get('Retry-After') ?? '');
 
       throw new FrontendApiError(
-        'Cbox ID is rate limiting this key.',
+        (await described(response)) ?? 'Cbox ID is rate limiting this key.',
         'rate_limited',
         429,
         Number.isFinite(retryAfter) ? retryAfter : undefined,
@@ -422,7 +422,13 @@ export class CboxIdFrontend {
 
     if (response.status === 401 || response.status === 403) {
       throw new FrontendApiError(
-        `Cbox ID refused the request (${response.status}). Check that this page's origin is on the key's allow-list, and that the key is not revoked.`,
+        // THE SERVER'S OWN REASON FIRST. It answers precisely — "No publishable key was
+        // presented" is a different problem from "That publishable key cannot be used
+        // from this origin" — and substituting a guess for it made this client less
+        // precise than the API it wraps. The fallback still stands for the browser case,
+        // where a refusal never becomes a readable Response at all.
+        (await described(response)) ??
+          `Cbox ID refused the request (${response.status}). Check that this page's origin is on the key's allow-list, and that the key is not revoked.`,
         'origin_not_allowed',
         response.status,
       );
@@ -430,7 +436,7 @@ export class CboxIdFrontend {
 
     if (!response.ok) {
       throw new FrontendApiError(
-        `Cbox ID returned ${response.status}.`,
+        (await described(response)) ?? `Cbox ID returned ${response.status}.`,
         'unavailable',
         response.status,
       );
@@ -457,6 +463,29 @@ export class CboxIdFrontend {
 
     return body as T;
   }
+}
+
+/**
+ * The server's own `error_description`, when it sent one.
+ *
+ * Read from a CLONE: the caller may still want the body, and a Response body can only be
+ * consumed once — a helper that quietly drained it would turn a precise error into a
+ * different, stranger one.
+ */
+async function described(response: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await response.clone().json();
+
+    if (typeof body === 'object' && body !== null && 'error_description' in body) {
+      const description = (body as { error_description: unknown }).error_description;
+
+      return typeof description === 'string' && description !== '' ? description : undefined;
+    }
+  } catch {
+    // A refusal without a readable body is the normal case in a browser.
+  }
+
+  return undefined;
 }
 
 /** The shape check for the config document. Structural, not exhaustive. */

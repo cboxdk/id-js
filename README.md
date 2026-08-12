@@ -173,8 +173,11 @@ support instead of to their identity provider.
 For the first two, finish with the code:
 
 ```ts
-if (result.status === 'mfa_required') {
-  const done = await frontend.submitSecondFactor(result.mfaToken, code)
+if (result.status === 'mfa_required' || result.status === 'otp_required') {
+  // The third argument is not optional for an emailed code: an `otp_required` finished
+  // with the default 'mfa' is answered against the wrong challenge and refused.
+  const method = result.status === 'otp_required' ? 'otp' : 'mfa'
+  const done = await frontend.submitSecondFactor(result.mfaToken, code, method)
   // done.status === 'ok' → spend done.loginTicket exactly as above
 }
 ```
