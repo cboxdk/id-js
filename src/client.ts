@@ -247,6 +247,14 @@ export class CboxIdClient {
    * bare "you are signed out" page. `idTokenHint` — the user's `id_token`, if you
    * still hold it — is the spec's other way to identify the RP, and additionally
    * tells the OP which subject is logging out.
+   *
+   * PASS THE HINT IF YOU WANT "SIGN OUT EVERYWHERE". Cbox ID revokes every session
+   * the person holds only when a hint it can VERIFY names the subject holding the
+   * browser; with no hint it signs this browser out and leaves their other devices
+   * alone. That is deliberate: the endpoint is unauthenticated and reached by a
+   * redirect, so a request carrying no proof of who it concerns could otherwise be
+   * forged into ending anyone's sessions everywhere. See laravel-id UPGRADING.md
+   * for 1.8.0.
    */
   async logoutUrl(returnTo?: string, idTokenHint?: string): Promise<string | null> {
     const endpoint = await this.discovery.optionalEndpoint('end_session_endpoint');
