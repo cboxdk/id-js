@@ -148,6 +148,18 @@ surfaced rather than hammered.
 
 ### Signing in from your own form
 
+> **This half needs a server that implements it.** `config()` and `session()` are served by
+> the `cboxdk/laravel-id` package itself, so they work against any instance built on it.
+> `signIn()`, `submitSecondFactor()` and the passkey calls are not: they post to
+> `/frontend/v1/sign-in*`, which *is* the sign-in policy and therefore lives in the
+> application rather than the package. [Cbox ID](https://github.com/cboxdk/cbox-id)
+> implements them; a bare `laravel-id` install answers 404 to all four.
+>
+> In a browser a 404 on a cross-origin request is indistinguishable from a dead network, so
+> this surfaces as `FrontendApiError` with `code: 'unavailable'` — nothing mentions a
+> missing route. **If `config()` works and `signIn()` says the service is unreachable, this
+> is why.**
+
 ```ts
 const result = await frontend.signIn(email, password)
 
