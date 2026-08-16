@@ -52,7 +52,7 @@ export interface FakeInstance {
    * 6749 §5.2 error body; a string is served verbatim, which is how a proxy or a captive
    * portal answers, and is the case where the SDK must NOT invent an error code.
    */
-  failNextToken(body: unknown, status: number): void;
+  failNextToken(body: unknown, status: number, headers?: Record<string, string>): void;
   fetchMock: ReturnType<typeof vi.fn>;
 }
 
@@ -113,7 +113,7 @@ export async function fakeInstance(
   let revocation: RecordedRequest | null = null;
   // A one-shot failure for the token endpoint, so a test can assert what the SDK makes of
   // an RFC 6749 §5.2 error body without permanently breaking the fake for the next call.
-  let nextTokenFailure: { body: unknown; status: number } | null = null;
+  let nextTokenFailure: { body: unknown; status: number; headers?: Record<string, string> } | null = null;
 
   const fetchMock = vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
     const url = String(input instanceof Request ? input.url : input);
@@ -129,9 +129,14 @@ export async function fakeInstance(
         const failure = nextTokenFailure;
         nextTokenFailure = null;
 
+        const headers = { ...(failure.headers ?? {}) };
+
         return typeof failure.body === 'string'
-          ? new Response(failure.body, { status: failure.status })
-          : json(failure.body, failure.status);
+          ? new Response(failure.body, { status: failure.status, headers })
+          : new Response(JSON.stringify(failure.body), {
+              status: failure.status,
+              headers: { 'content-type': 'application/json', ...headers },
+            });
       }
 
       const body = new URLSearchParams(String(init?.body ?? ''));
@@ -165,8 +170,8 @@ export async function fakeInstance(
     tokenResponse = response;
   };
 
-  const failNextToken = (body: unknown, status: number): void => {
-    nextTokenFailure = { body, status };
+  const failNextToken = (body: unknown, status: number, headers?: Record<string, string>): void => {
+    nextTokenFailure = { body, status, ...(headers ? { headers } : {}) };
   };
 
   return {

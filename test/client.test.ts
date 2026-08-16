@@ -434,3 +434,41 @@ describe('hosted profile & logout', () => {
     expect(url.searchParams.get('client_id')).toBe('client-abc');
   });
 });
+
+/**
+ * A 429 is the ONLY back-channel failure where the same request succeeds unchanged if you
+ * wait — every other one needs a different request or a new sign-in. The limiter says how
+ * long, and the SDK dropped the header, so a caller with a retry loop hammered a server
+ * that was already telling it to stop.
+ */
+describe('rate limiting', () => {
+  it('carries Retry-After off a 429 so a caller can back off for the stated time', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    inst.failNextToken({ message: 'Too Many Requests' }, 429, { 'retry-after': '42' });
+
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(client.refresh('some-token')).rejects.toMatchObject({
+      status: 429,
+      retryAfter: 42,
+      isRateLimited: true,
+    });
+  });
+
+  it('leaves retryAfter unset when the header is an HTTP-date rather than seconds', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    // Legal per RFC 9110 and deliberately not parsed: guessing at clock skew is worse
+    // than saying nothing, and `isRateLimited` still tells the caller to back off.
+    inst.failNextToken({ message: 'slow down' }, 429, { 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' });
+
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(client.refresh('some-token')).rejects.toMatchObject({
+      status: 429,
+      retryAfter: undefined,
+      isRateLimited: true,
+    });
+  });
+});

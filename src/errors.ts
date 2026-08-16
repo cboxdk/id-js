@@ -38,8 +38,23 @@ export class AuthenticationError extends CboxIdError {
     readonly errorDescription?: string,
     /** HTTP status, for the cases where the body says nothing useful. */
     readonly status?: number,
+    /**
+     * Seconds to wait, off the `Retry-After` header — set only on a 429.
+     *
+     * The distinction it carries is the one a caller most needs and could least infer:
+     * a 429 is the ONLY back-channel failure where the same request will succeed
+     * unchanged if you simply wait. Every other one needs a different request, or a new
+     * sign-in. Without this the SDK reported "token refresh failed" and a caller with a
+     * retry loop hammered a limiter that was already telling it exactly how long to stop.
+     */
+    readonly retryAfter?: number,
   ) {
     super(message);
+  }
+
+  /** Whether waiting `retryAfter` seconds and repeating the same request is worth it. */
+  get isRateLimited(): boolean {
+    return this.status === 429;
   }
 }
 
@@ -71,7 +86,16 @@ export async function oauthError(response: Response, fallback: string): Promise<
 
   const detail = code ?? (body.trim() === '' ? `HTTP ${response.status}` : body.slice(0, 200));
 
-  return new AuthenticationError(`${fallback}: ${detail}`, code, description, response.status);
+  // `Retry-After` is seconds here — Laravel's throttler writes the integer form. The
+  // HTTP-date form is legal too and is deliberately NOT parsed: guessing at a clock
+  // skew is worse than saying nothing, and `status === 429` still tells the caller to
+  // back off.
+  const retryAfterHeader = response.headers.get('retry-after');
+  const retryAfter = retryAfterHeader !== null && /^\d+$/.test(retryAfterHeader.trim())
+    ? Number(retryAfterHeader.trim())
+    : undefined;
+
+  return new AuthenticationError(`${fallback}: ${detail}`, code, description, response.status, retryAfter);
 }
 
 /**
