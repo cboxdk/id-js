@@ -1,6 +1,6 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import { Discovery } from './discovery.js';
-import { AuthenticationError, ConfigurationError, InvalidStateError } from './errors.js';
+import { AuthenticationError, ConfigurationError, InvalidStateError, oauthError } from './errors.js';
 import { challenge, createVerifier, randomToken } from './pkce.js';
 import type {
   AuthorizationRequest,
@@ -208,7 +208,11 @@ export class CboxIdClient {
 
     const response = await this.post(await this.discovery.endpoint('token_endpoint'), body);
     if (!response.ok) {
-      throw new AuthenticationError(`Token refresh failed: ${await response.text()}`);
+      // The most consequential of these: `invalid_grant` means the refresh token is
+      // spent, revoked or replayed and the person must sign in again, while a 5xx or
+      // `temporarily_unavailable` means the same token is still good in a moment. One
+      // message string for both is what makes callers guess.
+      throw await oauthError(response, 'Token refresh failed');
     }
 
     const tokens = (await response.json()) as TokenResponse;
@@ -290,7 +294,7 @@ export class CboxIdClient {
 
     const response = await this.post(await this.discovery.endpoint('token_endpoint'), body);
     if (!response.ok) {
-      throw new AuthenticationError(`Machine token request failed: ${await response.text()}`);
+      throw await oauthError(response, 'Machine token request failed');
     }
     const json = (await response.json()) as { access_token?: unknown };
     if (typeof json.access_token !== 'string') {
@@ -309,7 +313,7 @@ export class CboxIdClient {
       headers: { authorization: `Bearer ${accessToken}` },
     });
     if (!response.ok) {
-      throw new AuthenticationError('Userinfo request failed.');
+      throw await oauthError(response, 'Userinfo request failed');
     }
     return (await response.json()) as Record<string, unknown>;
   }
@@ -327,31 +331,47 @@ export class CboxIdClient {
       { authorization: `Basic ${basic}` },
     );
     if (!response.ok) {
-      throw new AuthenticationError('Introspection request failed.');
+      throw await oauthError(response, 'Introspection request failed');
     }
     return (await response.json()) as Record<string, unknown>;
   }
 
   /**
-   * RFC 7009 token revocation (confidential-client auth). Revokes an access or
-   * refresh token; revoking a refresh token also drops the whole token family, so
-   * this is what a real "sign out everywhere" does. Requires a secret.
+   * RFC 7009 token revocation. Revokes an access or refresh token; revoking a refresh
+   * token drops the whole token family, so this is what a real "sign out everywhere" does.
+   *
+   * **PUBLIC CLIENTS TOO.** This demanded a secret and threw `ConfigurationError` without
+   * one — so the clients that most need it were the ones that could not call it. A PKCE
+   * browser or native app authenticates with `none`, holds no secret, and is exactly the
+   * case where a refresh token sits in storage on a device somebody has just signed out
+   * of. Cbox ID's revocation endpoint accepts a public client, and its discovery document
+   * advertises `none` among the revocation auth methods; RFC 7009 §2.1 scopes every
+   * revocation to the calling client, so the only capability here is "destroy a token you
+   * are already holding". The SDK was the half saying no.
+   *
+   * A confidential client still authenticates with Basic; a public one names itself in the
+   * body, the same shape {@link exchange} already uses for the token endpoint.
    *
    * Per RFC 7009 the server answers 200 for an unknown or already-revoked token, so
-   * a successful call means "the token is not valid any more", not "it existed".
+   * success means "this token is not valid any more", not "it existed".
    *
    * @param tokenTypeHint which store to search first — only a hint, never required.
    */
   async revoke(token: string, tokenTypeHint?: TokenTypeHint): Promise<void> {
     const endpoint = await this.discovery.endpoint('revocation_endpoint');
-    const basic = btoa(`${this.config.clientId}:${this.requireSecret()}`);
-    const body = new URLSearchParams({ token });
+    const body = new URLSearchParams({ token, client_id: this.config.clientId });
     if (tokenTypeHint) {
       body.set('token_type_hint', tokenTypeHint);
     }
-    const response = await this.post(endpoint, body, { authorization: `Basic ${basic}` });
+
+    const headers: Record<string, string> = {};
+    if (this.config.clientSecret) {
+      headers.authorization = `Basic ${btoa(`${this.config.clientId}:${this.config.clientSecret}`)}`;
+    }
+
+    const response = await this.post(endpoint, body, headers);
     if (!response.ok) {
-      throw new AuthenticationError('Revocation request failed.');
+      throw await oauthError(response, 'Revocation request failed');
     }
   }
 
@@ -383,7 +403,7 @@ export class CboxIdClient {
 
     const response = await this.post(await this.discovery.endpoint('token_endpoint'), body);
     if (!response.ok) {
-      throw new AuthenticationError(`Token exchange failed: ${await response.text()}`);
+      throw await oauthError(response, 'Token exchange failed');
     }
     return (await response.json()) as TokenResponse;
   }

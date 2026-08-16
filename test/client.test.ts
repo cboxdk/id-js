@@ -318,13 +318,73 @@ describe('back-channel calls', () => {
     expect(inst.revocation()?.body.has('token_type_hint')).toBe(false);
   });
 
-  it('refuses to revoke without a client secret', async () => {
+  /**
+   * The clients that most need revocation were the ones that could not call it.
+   *
+   * A PKCE browser or native app authenticates with `none` and holds no secret — and it
+   * is exactly the case where a refresh token sits in storage on a device somebody has
+   * just signed out of. This threw `ConfigurationError` before reaching the network, so
+   * every such sign-out left the token valid for its whole lifetime.
+   *
+   * The server opened this on 2026-08-12 (`authenticate()`, not
+   * `authenticateConfidential()`), and its discovery document advertises `none` among the
+   * revocation auth methods. The assertion this replaces was written on 2026-07-25 and
+   * described the world before that. RFC 7009 §2.1 scopes a revocation to the calling
+   * client, so the only capability is destroying a token you already hold.
+   */
+  it('revokes for a public client, naming itself in the body instead of a Basic header', async () => {
     const inst = await fakeInstance();
     vi.stubGlobal('fetch', inst.fetchMock);
     const { clientSecret: _omitted, ...publicConfig } = baseConfig;
     const client = new CboxIdClient(publicConfig);
 
-    await expect(client.revoke('some-token')).rejects.toBeInstanceOf(ConfigurationError);
+    await expect(client.revoke('refresh-abc', 'refresh_token')).resolves.toBeUndefined();
+
+    const sent = inst.revocation();
+    expect(sent?.url).toBe(`${ISSUER}/oauth/revoke`);
+    // No secret to put in one, and inventing an empty Basic header would authenticate
+    // as a confidential client with a blank password — which the server must refuse.
+    expect(sent?.authorization).toBeNull();
+    expect(sent?.body.get('client_id')).toBe('client-abc');
+    expect(sent?.body.get('token')).toBe('refresh-abc');
+  });
+
+  /**
+   * The RFC 6749 §5.2 code survives the boundary.
+   *
+   * Every back-channel failure collapsed into one message string, and the two that matter
+   * most demand opposite responses: `invalid_grant` on a refresh means the session is over
+   * and the person must sign in again; a 503 means the same token is still good shortly.
+   * A caller left matching on prose either retries what can never succeed or signs out
+   * somebody who did not need to be.
+   */
+  it('carries the OAuth error code and description off a failed refresh', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    inst.failNextToken({ error: 'invalid_grant', error_description: 'Refresh token was revoked.' }, 400);
+
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(client.refresh('spent-token')).rejects.toMatchObject({
+      error: 'invalid_grant',
+      errorDescription: 'Refresh token was revoked.',
+      status: 400,
+    });
+  });
+
+  it('does not invent an error code when the body is not an OAuth error', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    // A proxy or captive portal answering HTML — the caller still needs an error rather
+    // than a parse exception, and `e.error === 'invalid_grant'` must stay false.
+    inst.failNextToken('<html>502 Bad Gateway</html>', 502);
+
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(client.refresh('some-token')).rejects.toMatchObject({
+      error: undefined,
+      status: 502,
+    });
   });
 });
 

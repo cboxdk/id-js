@@ -47,6 +47,12 @@ export interface FakeInstance {
   foreignIdToken(claims: Record<string, unknown>): Promise<string>;
   /** Replace what the token endpoint returns for an authorization_code exchange. */
   setTokenResponse(response: Record<string, unknown>): void;
+  /**
+   * Make the NEXT token-endpoint call fail, once. An object is served as JSON — an RFC
+   * 6749 §5.2 error body; a string is served verbatim, which is how a proxy or a captive
+   * portal answers, and is the case where the SDK must NOT invent an error code.
+   */
+  failNextToken(body: unknown, status: number): void;
   fetchMock: ReturnType<typeof vi.fn>;
 }
 
@@ -105,6 +111,9 @@ export async function fakeInstance(
   };
 
   let revocation: RecordedRequest | null = null;
+  // A one-shot failure for the token endpoint, so a test can assert what the SDK makes of
+  // an RFC 6749 §5.2 error body without permanently breaking the fake for the next call.
+  let nextTokenFailure: { body: unknown; status: number } | null = null;
 
   const fetchMock = vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
     const url = String(input instanceof Request ? input.url : input);
@@ -116,6 +125,15 @@ export async function fakeInstance(
       return json({ keys: [jwk] });
     }
     if (url === discovery.token_endpoint) {
+      if (nextTokenFailure !== null) {
+        const failure = nextTokenFailure;
+        nextTokenFailure = null;
+
+        return typeof failure.body === 'string'
+          ? new Response(failure.body, { status: failure.status })
+          : json(failure.body, failure.status);
+      }
+
       const body = new URLSearchParams(String(init?.body ?? ''));
       if (body.get('grant_type') === 'client_credentials') {
         return json({ access_token: 'machine-token', token_type: 'Bearer' });
@@ -147,5 +165,17 @@ export async function fakeInstance(
     tokenResponse = response;
   };
 
-  return { jwk, revocation: () => revocation, signIdToken, foreignIdToken, setTokenResponse, fetchMock };
+  const failNextToken = (body: unknown, status: number): void => {
+    nextTokenFailure = { body, status };
+  };
+
+  return {
+    jwk,
+    revocation: () => revocation,
+    signIdToken,
+    foreignIdToken,
+    setTokenResponse,
+    failNextToken,
+    fetchMock,
+  };
 }

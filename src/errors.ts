@@ -21,8 +21,58 @@ export class InvalidStateError extends CboxIdError {}
 /**
  * Login could not be completed: the provider returned an error, the callback was
  * missing a code, or a token / id_token failed verification.
+ *
+ * `error` carries the RFC 6749 §5.2 code the authorization server sent, when it sent one.
+ * It used to be discarded at every back-channel boundary, leaving a single message string
+ * for outcomes that need opposite responses: `invalid_grant` on a refresh means the
+ * session is over and the person has to sign in again, while `temporarily_unavailable`
+ * means try the same token in a moment. A caller reduced to matching on prose either
+ * retries what can never succeed, or signs out somebody who did not need to be.
  */
-export class AuthenticationError extends CboxIdError {}
+export class AuthenticationError extends CboxIdError {
+  constructor(
+    message: string,
+    /** RFC 6749 §5.2 error code, when the server sent a parseable one. */
+    readonly error?: string,
+    /** The server's `error_description`, verbatim. Not end-user copy. */
+    readonly errorDescription?: string,
+    /** HTTP status, for the cases where the body says nothing useful. */
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Read an OAuth error out of a failed token-endpoint response.
+ *
+ * Best-effort by design: a 502 from a proxy is HTML, a captive portal is worse, and the
+ * caller still needs an error rather than a parse exception. What it must never do is
+ * invent a code — an absent or unparseable `error` stays undefined, so
+ * `e.error === 'invalid_grant'` is true only because the server said so.
+ */
+export async function oauthError(response: Response, fallback: string): Promise<AuthenticationError> {
+  const body = await response.text().catch(() => '');
+
+  let code: string | undefined;
+  let description: string | undefined;
+
+  try {
+    const parsed: unknown = JSON.parse(body);
+
+    if (typeof parsed === 'object' && parsed !== null) {
+      const { error, error_description: errorDescription } = parsed as Record<string, unknown>;
+      code = typeof error === 'string' ? error : undefined;
+      description = typeof errorDescription === 'string' ? errorDescription : undefined;
+    }
+  } catch {
+    // Not JSON. The status and the truncated body below are all there is to report.
+  }
+
+  const detail = code ?? (body.trim() === '' ? `HTTP ${response.status}` : body.slice(0, 200));
+
+  return new AuthenticationError(`${fallback}: ${detail}`, code, description, response.status);
+}
 
 /**
  * The Frontend API refused, or could not be reached.
