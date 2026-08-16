@@ -26,7 +26,7 @@ interface SignatureCase {
   reversed_order_header: string;
 }
 
-const fixture: { cases: SignatureCase[] } = JSON.parse(
+const fixture: { signed_payload_template: string; header_template: string; cases: SignatureCase[] } = JSON.parse(
   readFileSync(fileURLToPath(new URL('./fixtures/webhook-signature.json', import.meta.url)), 'utf8'),
 );
 
@@ -92,4 +92,36 @@ describe('verifyWebhook against the shared cross-SDK vectors', () => {
       }),
     ).toBe(false);
   });
+});
+
+/**
+ * The wire format, stated once as a constant.
+ *
+ * This package verifies against its OWN copy of the fixture, as every SDK does, so a copy
+ * that drifts is silent: this suite stays green against the drifted bytes while every
+ * delivery from the server 401s in the field. The templates were the one field no test
+ * read — flipping `signed_payload_template` to `{body}.{timestamp}` here changed nothing,
+ * because each case also carries its signed payload as a literal.
+ *
+ * Deliberately NOT derived from the file it guards: `{timestamp}.{body}` is the contract
+ * with the sender, and a copy that says otherwise is wrong rather than authoritative.
+ */
+describe('the shared fixture', () => {
+  it('pins the signed-payload order this package must agree with the server on', () => {
+    expect(fixture.signed_payload_template).toBe('{timestamp}.{body}');
+    expect(fixture.header_template).toBe('t={timestamp},v1={signature}');
+  });
+
+  it.each(fixture.cases.map((c) => [c.name, c] as const))(
+    'builds %s from the templates it publishes',
+    (_name, testCase) => {
+      const signedPayload = fixture.signed_payload_template
+        .replace('{timestamp}', String(testCase.timestamp))
+        .replace('{body}', testCase.body);
+
+      // The template and the literal are the same fact stated twice; either one edited
+      // alone is now a failure, which is what makes carrying both worthwhile.
+      expect(signedPayload).toBe(testCase.signed_payload);
+    },
+  );
 });
