@@ -472,3 +472,77 @@ describe('rate limiting', () => {
     });
   });
 });
+
+/**
+ * OIDC Core §5.3.2 — the UserInfo response is bound to the id_token, or it is not used.
+ *
+ * UserInfo is fetched with a bearer token and its body carries no signature. The SDK
+ * spread it OVER the verified claims, so whatever it returned won: `sub`, `org`, and
+ * every other claim the id_token's signature covered. Nothing tested it, and the sibling
+ * `cboxdk/laravel-id-client` had checked this from the start — so the two SDKs disagreed
+ * about who the user is.
+ */
+describe('UserInfo is bound to the verified id_token', () => {
+  const stored = { state: 'state-1', codeVerifier: 'verifier-1', nonce: NONCE };
+
+  it('refuses a UserInfo response naming a different subject', async () => {
+    // The whole attack in one line: the signed token says user-1, the unsigned body says
+    // somebody else, and the SDK used to believe the body.
+    const inst = await fakeInstance({ userinfo: { sub: 'victim-9', email: 'victim@acme.com' } });
+    vi.stubGlobal('fetch', inst.fetchMock);
+
+    const client = new CboxIdClient(baseConfig);
+
+    await expect(
+      client.authenticate({ params: { code: 'auth-code', state: 'state-1' }, stored }),
+    ).rejects.toThrow(/UserInfo subject does not match/i);
+  });
+
+  it('lets UserInfo enrich but never override a signed claim', async () => {
+    // `org` is an authorization claim: whoever sets it decides which tenant this session
+    // belongs to. The id_token says org-1; UserInfo tries to say org-admin.
+    const inst = await fakeInstance({
+      userinfo: { sub: 'user-1', email: 'ada@acme.com', name: 'Ada', org: 'org-admin', title: 'Engineer' },
+    });
+    vi.stubGlobal('fetch', inst.fetchMock);
+
+    const user = await new CboxIdClient(baseConfig).authenticate({
+      params: { code: 'auth-code', state: 'state-1' },
+      stored,
+    });
+
+    expect(user.organizationId).toBe('org-1');
+    // …and the enrichment still happens, which is why the merge exists at all.
+    expect(user.claims['title']).toBe('Engineer');
+  });
+
+  it('refuses an openid login that came back without an id_token', async () => {
+    // Identity would otherwise come from UserInfo alone — a bearer-authenticated endpoint
+    // whose response nothing signed — and the stored nonce would never be used.
+    const inst = await fakeInstance();
+    inst.setTokenResponse({ access_token: 'access-abc', expires_in: 3600, token_type: 'Bearer' });
+    vi.stubGlobal('fetch', inst.fetchMock);
+
+    await expect(
+      new CboxIdClient(baseConfig).authenticate({
+        params: { code: 'auth-code', state: 'state-1' },
+        stored: { ...stored, scopes: ['openid', 'email'] },
+      }),
+    ).rejects.toThrow(/no id_token/i);
+  });
+
+  it('allows a non-openid flow to complete without an id_token', async () => {
+    // The other side of the rule: a caller who never asked for `openid` is running an
+    // OAuth flow and must not be held to an OIDC requirement.
+    const inst = await fakeInstance();
+    inst.setTokenResponse({ access_token: 'access-abc', expires_in: 3600, token_type: 'Bearer' });
+    vi.stubGlobal('fetch', inst.fetchMock);
+
+    const user = await new CboxIdClient(baseConfig).authenticate({
+      params: { code: 'auth-code', state: 'state-1' },
+      stored: { ...stored, scopes: ['api.read'] },
+    });
+
+    expect(user.id).toBe('user-1');
+  });
+});

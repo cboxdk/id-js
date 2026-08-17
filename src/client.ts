@@ -31,6 +31,16 @@ export interface StoredAuthState {
   nonce: string;
   /** The `maxAge` this login demanded, if any. See {@link AuthorizationRequest.maxAge}. */
   maxAge?: number;
+  /**
+   * The scopes THIS authorization asked for, when you overrode the configured set.
+   *
+   * Read so `authenticate()` can judge the response against what was requested rather
+   * than against the config: a login that asked for `openid` and came back without an
+   * id_token is a protocol violation, and one that never asked cannot be held to it.
+   * Omitted, the configured scopes are assumed — which is what a caller who did not
+   * override them actually sent.
+   */
+  scopes?: string[];
 }
 
 /**
@@ -153,9 +163,21 @@ export class CboxIdClient {
       throw new AuthenticationError('No access token was returned.');
     }
 
-    let claims: Record<string, unknown> = {};
+    let verified: Record<string, unknown> = {};
+
     if (tokens.id_token) {
-      claims = await this.verifyIdToken(tokens.id_token, stored.nonce, stored.maxAge);
+      verified = await this.verifyIdToken(tokens.id_token, stored.nonce, stored.maxAge);
+    } else if ((stored.scopes ?? this.scopes()).includes('openid')) {
+      // AN `openid` REQUEST WITHOUT AN ID_TOKEN IS A PROTOCOL VIOLATION, and refusing it
+      // is the difference between an authenticated login and a bearer token. Without this
+      // the identity below came from UserInfo alone — a bearer-authenticated endpoint
+      // whose response nothing signed — and the `nonce` pulled from storage was never used.
+      //
+      // Asked of the SCOPES REQUESTED, not of the response: a caller who never asked for
+      // `openid` is running an OAuth flow and is not held to an OIDC rule.
+      throw new AuthenticationError(
+        'An openid login returned no id_token, so the identity could not be verified.',
+      );
     } else if (typeof stored.maxAge === 'number') {
       // No id_token means no auth_time, and therefore no evidence the demanded
       // re-authentication happened. Accepting that silently is the whole defect.
@@ -163,8 +185,25 @@ export class CboxIdClient {
         'A max_age was requested but no id_token was returned, so the authentication age could not be verified.',
       );
     }
-    // Enrich with userinfo (email/name/org a minimal id_token may omit).
-    claims = { ...claims, ...(await this.userinfo(tokens.access_token)) };
+
+    const profile = await this.userinfo(tokens.access_token);
+
+    // OIDC Core §5.3.2: the UserInfo `sub` MUST match the id_token's, and when it does
+    // not the response MUST NOT be used. UserInfo is fetched with a bearer token and its
+    // body carries no signature, so without this an IdP — or anything able to answer as
+    // one — hands back `{"sub":"somebody-else"}` and the SDK returns it as the identity.
+    const verifiedSub = verified['sub'];
+    const profileSub = profile['sub'];
+
+    if (typeof verifiedSub === 'string' && typeof profileSub === 'string' && !timingSafeEqualString(verifiedSub, profileSub)) {
+      throw new AuthenticationError('The UserInfo subject does not match the verified id_token.');
+    }
+
+    // ENRICHES, NEVER REPLACES. UserInfo fills in what a minimal id_token omits (email,
+    // name, org) and the verified claims go back on top, so the merge cannot move `sub`,
+    // `iss`, `aud`, `nonce` or anything else the signature covered. The spread used to run
+    // the other way round.
+    const claims: Record<string, unknown> = { ...profile, ...verified };
 
     const sub = claims['sub'];
     if (typeof sub !== 'string' || sub === '') {
