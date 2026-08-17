@@ -52,3 +52,56 @@ describe('verifyWebhook', () => {
     expect(await verifyWebhook({ payload, signatureHeader: 't=abc,v1=xx', secret, now })).toBe(false);
   });
 });
+
+/**
+ * A signature is accepted only in full, and only at its exact length.
+ *
+ * The comparison here is hand-rolled — `crypto.timingSafeEqual` is a Node API and this
+ * package runs in browsers and workers too — so its two properties are ours to hold, and
+ * neither had a test. Both survived mutation: replacing the comparison with an 8-character
+ * prefix match, and deleting the length check, each left the whole suite green.
+ *
+ * The length check is not cosmetic. Without it the loop runs over the EXPECTED digest's
+ * length and simply never reads the extra characters, so a valid signature with anything
+ * appended verifies — measured directly: `tse(good, good + 'JUNK')` is true.
+ */
+describe('signature comparison', () => {
+  const now = 1_700_000_000;
+
+  it('rejects a valid signature with anything appended', async () => {
+    const header = await sign(now, payload);
+
+    // The digest is intact and complete; there is simply more after it. A comparison that
+    // walks only the expected length cannot see the difference.
+    expect(
+      await verifyWebhook({ payload, signatureHeader: `${header}00`, secret, now }),
+    ).toBe(false);
+  });
+
+  it('rejects a signature truncated to a valid prefix', async () => {
+    const header = await sign(now, payload);
+    const [stamp, v1] = header.split(',');
+    const digest = (v1 ?? '').slice('v1='.length);
+
+    // Every character present is correct — there are just fewer of them. This is what a
+    // prefix comparison accepts, and the only test that can tell one apart from a full one.
+    expect(
+      await verifyWebhook({
+        payload,
+        signatureHeader: `${stamp},v1=${digest.slice(0, 32)}`,
+        secret,
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  it('rejects a signature that differs only in its last character', async () => {
+    const header = await sign(now, payload);
+    const flipped = header.slice(0, -1) + (header.endsWith('0') ? '1' : '0');
+
+    // The far end of the digest, where a comparison that stops early never looks.
+    expect(
+      await verifyWebhook({ payload, signatureHeader: flipped, secret, now }),
+    ).toBe(false);
+  });
+});
