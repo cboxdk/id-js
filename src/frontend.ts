@@ -1,3 +1,4 @@
+import { assertSecureIssuer } from './issuer.js';
 import { ConfigurationError, FrontendApiError } from './errors.js';
 
 /**
@@ -126,6 +127,12 @@ export class CboxIdFrontend {
     if (!options.issuer) {
       throw new ConfigurationError('issuer is required.');
     }
+
+    // The browser channel carries login tickets, one-time codes and the session the user
+    // is in the middle of establishing. Over `http` a network attacker on the same café
+    // Wi-Fi reads the ticket and redeems it — and the sign-in box the user is looking at
+    // is served by the attacker, so nothing about the page tells them.
+    assertSecureIssuer(options.issuer);
 
     // Caught here rather than at the first request, because the failure otherwise arrives
     // as an opaque 401 from the network tab and the cause — a secret key pasted into a

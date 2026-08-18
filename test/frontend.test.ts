@@ -39,6 +39,24 @@ describe('CboxIdFrontend', () => {
     ).toThrow(ConfigurationError);
   });
 
+  /**
+   * The browser channel carries login tickets, one-time codes and the session the user is
+   * in the middle of establishing. Over http a network attacker reads the ticket and
+   * redeems it — and serves the sign-in box the user is looking at, so nothing on the page
+   * gives it away.
+   */
+  it('refuses an issuer that is not https', () => {
+    expect(
+      () => new CboxIdFrontend({ issuer: 'http://id.acme.test', publishableKey: 'pk_live_abc' }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it('allows a loopback issuer over http, for local development', () => {
+    expect(
+      () => new CboxIdFrontend({ issuer: 'http://localhost:8000', publishableKey: 'pk_test_abc' }),
+    ).not.toThrow();
+  });
+
   it('sends the key in a header, never in the query string', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(respond(CONFIG));
 

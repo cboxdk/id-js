@@ -585,7 +585,7 @@ describe('transport and document trust', () => {
             headers: { 'content-type': 'application/json' },
           });
         }
-        return original(input, init) as Promise<Response>;
+        return (original as unknown as typeof fetch)(input as RequestInfo, init);
       }),
     );
 
