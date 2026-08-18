@@ -1,6 +1,6 @@
 {
   "name": "@cboxdk/id-js",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "Turnkey Cbox ID client for JavaScript/TypeScript — OpenID Connect login (PKCE + id_token verification via JWKS), hosted profile-management redirect, machine tokens, UserInfo, RFC 7662 introspection, and webhook signature verification. Runs on Node, edge, and the browser, with a first-class Next.js adapter.",
   "type": "module",
   "license": "MIT",

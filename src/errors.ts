@@ -84,7 +84,12 @@ export async function oauthError(response: Response, fallback: string): Promise<
     // Not JSON. The status and the truncated body below are all there is to report.
   }
 
-  const detail = code ?? (body.trim() === '' ? `HTTP ${response.status}` : body.slice(0, 200));
+  // THE BODY IS NEVER ECHOED. These calls carry `client_secret`, `code_verifier` and
+  // refresh tokens in their REQUEST, and a debug proxy, a captive portal or an upstream
+  // error page that reflects what it received puts those straight into a thrown message
+  // — which production apps log. Only the server's own OAuth error code travels, and
+  // failing that, the status alone.
+  const detail = code ?? `HTTP ${response.status}`;
 
   // `Retry-After` is seconds here — Laravel's throttler writes the integer form. The
   // HTTP-date form is legal too and is deliberately NOT parsed: guessing at a clock

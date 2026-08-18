@@ -6,7 +6,7 @@ import {
   InvalidStateError,
 } from '../src/index.js';
 import { challenge } from '../src/pkce.js';
-import { fakeInstance, ISSUER, NONCE } from './helpers.js';
+import { discovery, fakeInstance, ISSUER, NONCE } from './helpers.js';
 
 const baseConfig = {
   issuer: ISSUER,
@@ -544,5 +544,85 @@ describe('UserInfo is bound to the verified id_token', () => {
     });
 
     expect(user.id).toBe('user-1');
+  });
+});
+
+/**
+ * Findings from the second security pass, each of which the suite could not see.
+ */
+describe('transport and document trust', () => {
+  const stored = { state: 'state-1', codeVerifier: 'verifier-1', nonce: NONCE };
+
+  it('refuses a plaintext issuer', () => {
+    // Everything this SDK sends the issuer carries a credential — the code, the PKCE
+    // verifier, the client secret, the refresh token. Over http a network attacker reads
+    // all of them AND replaces the discovery document and JWKS, after which a forged
+    // id_token verifies cleanly and the whole verification chain proves nothing.
+    expect(() => new CboxIdClient({ ...baseConfig, issuer: 'http://id.acme.com' })).toThrow(
+      /must be https/i,
+    );
+  });
+
+  it('allows plaintext loopback, which is what a native app and a dev instance use', () => {
+    // RFC 8252: a native app's own callback listener is loopback by definition.
+    expect(() => new CboxIdClient({ ...baseConfig, issuer: 'http://127.0.0.1:8000' })).not.toThrow();
+    expect(() => new CboxIdClient({ ...baseConfig, issuer: 'http://localhost:8000' })).not.toThrow();
+  });
+
+  it('refuses a discovery document issued for a different issuer', async () => {
+    const inst = await fakeInstance();
+    // The same host answering with another tenant's document: RFC 8414 §3.3 says the
+    // `issuer` inside MUST match the one it was fetched for. Without the check the SDK
+    // sends credentials to that tenant's endpoints and verifies against its JWKS, while
+    // the caller still believes it is talking to the issuer it configured.
+    const original = inst.fetchMock;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
+        if (String(input).endsWith('/.well-known/openid-configuration')) {
+          return new Response(JSON.stringify({ ...discovery, issuer: 'https://someone-else.test' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return original(input, init) as Promise<Response>;
+      }),
+    );
+
+    await expect(
+      new CboxIdClient(baseConfig).authenticate({
+        params: { code: 'auth-code', state: 'state-1' },
+        stored,
+      }),
+    ).rejects.toThrow(/different issuer/i);
+  });
+
+  it('verifies the id_token a refresh returns, instead of handing it back unchecked', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    // A token signed by the wrong key, presenting the advertised kid. An application that
+    // updates its session claims from refresh().idToken used to accept this.
+    inst.setTokenResponse({
+      access_token: 'access-abc',
+      id_token: await inst.foreignIdToken({ iss: ISSUER, aud: 'client-abc', sub: 'user-1' }),
+      expires_in: 3600,
+      token_type: 'Bearer',
+    });
+
+    await expect(new CboxIdClient(baseConfig).refresh('refresh-abc')).rejects.toThrow(
+      /id_token could not be verified/i,
+    );
+  });
+
+  it('does not echo a failed response body, which carries the credentials it was sent', async () => {
+    const inst = await fakeInstance();
+    vi.stubGlobal('fetch', inst.fetchMock);
+    // A debug proxy or upstream error page that reflects the request it received. The
+    // request body for this call holds client_secret and the refresh token.
+    inst.failNextToken('client_secret=csec_REALSECRET&refresh_token=rt_REALTOKEN', 502);
+
+    await expect(new CboxIdClient(baseConfig).refresh('rt_REALTOKEN')).rejects.toSatisfy(
+      (e: Error) => !e.message.includes('csec_REALSECRET') && !e.message.includes('rt_REALTOKEN'),
+    );
   });
 });

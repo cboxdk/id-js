@@ -20,7 +20,7 @@ export class Discovery {
       return this.cached.doc;
     }
 
-    const url = `${this.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`;
+    const url = `${trimSlash(this.issuer)}/.well-known/openid-configuration`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -44,6 +44,17 @@ export class Discovery {
       throw new AuthenticationError('The discovery document was missing an issuer.');
     }
 
+    // RFC 8414 §3.3: the `issuer` in the document MUST match the one it was fetched for.
+    // Without this the SDK sends credentials to whatever endpoints the document names and
+    // verifies tokens against whatever JWKS it points at, while the caller still believes
+    // it is talking to the issuer it configured — so one tenant's host answering with
+    // another tenant's document silently redirects the whole flow.
+    if (trimSlash(doc.issuer) !== trimSlash(this.issuer)) {
+      throw new AuthenticationError(
+        `The discovery document is for a different issuer (${doc.issuer}).`,
+      );
+    }
+
     this.cached = { doc, expiresAt: this.now() + this.cacheTtlMs };
     return doc;
   }
@@ -62,4 +73,9 @@ export class Discovery {
     const value = (await this.document())[name];
     return typeof value === 'string' && value !== '' ? value : null;
   }
+}
+
+/** Compare issuers without letting a trailing slash decide identity. */
+function trimSlash(value: string): string {
+  return value.replace(/\/+$/, '');
 }

@@ -73,6 +73,7 @@ export class CboxIdClient {
     if (!config.redirectUri) {
       throw new ConfigurationError('Cbox ID config `redirectUri` is required.');
     }
+    assertSecureIssuer(config.issuer);
     this.discovery = new Discovery(
       config.issuer,
       config.timeoutMs ?? 10_000,
@@ -257,6 +258,16 @@ export class CboxIdClient {
     const tokens = (await response.json()) as TokenResponse;
     if (!tokens.access_token) {
       throw new AuthenticationError('The refresh response carried no access token.');
+    }
+
+    // VERIFIED BEFORE IT IS HANDED BACK. A refresh response carries a fresh id_token, and
+    // this returned it unchecked — so an application that refreshes its session claims
+    // from `refresh().idToken` accepted a forged, expired, wrong-audience or wrong-issuer
+    // token, having verified only the one it got at login. The nonce is not re-checked:
+    // RFC 6749 has no nonce on this leg, and OIDC Core §12.2 says an id_token from a
+    // refresh need not carry one.
+    if (tokens.id_token) {
+      await this.verifyIdToken(tokens.id_token, '');
     }
 
     return {
@@ -449,6 +460,9 @@ export class CboxIdClient {
 
   private async verifyIdToken(
     idToken: string,
+    // Empty skips the nonce comparison below, which is what a refresh leg needs: RFC 6749
+    // has no nonce there and OIDC Core §12.2 says the id_token from a refresh need not
+    // carry one. Signature, issuer, audience and expiry are checked either way.
     nonce: string,
     maxAge?: number,
   ): Promise<Record<string, unknown>> {
@@ -578,4 +592,39 @@ function parseOrganizations(claim: unknown): CboxOrganization[] | undefined {
     }
   }
   return orgs;
+}
+
+/**
+ * An issuer must be HTTPS.
+ *
+ * Everything this SDK does with it carries a credential: the authorization code, the PKCE
+ * verifier, the client secret, the refresh token. Over `http://` a network attacker reads
+ * all of them — and, worse, replaces the discovery document and JWKS, at which point a
+ * forged id_token verifies cleanly and the whole verification chain proves nothing.
+ *
+ * Loopback is allowed because a native app's own callback listener is loopback by
+ * definition (RFC 8252) and a dev instance runs there.
+ */
+function assertSecureIssuer(issuer: string): void {
+  let url: URL;
+
+  try {
+    url = new URL(issuer);
+  } catch {
+    throw new ConfigurationError('Cbox ID config `issuer` is not a valid URL.');
+  }
+
+  if (url.protocol === 'https:') {
+    return;
+  }
+
+  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]' || url.hostname === '::1';
+
+  if (url.protocol === 'http:' && loopback) {
+    return;
+  }
+
+  throw new ConfigurationError(
+    `Cbox ID config \`issuer\` must be https (got ${url.protocol}//${url.hostname}).`,
+  );
 }
