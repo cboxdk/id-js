@@ -105,3 +105,44 @@ describe('signature comparison', () => {
     ).toBe(false);
   });
 });
+
+/*
+ * A NON-NUMERIC TIMESTAMP HAS TO BE REFUSED BY SHAPE, not left to arithmetic.
+ *
+ * Found by mutation: deleting the shape check left every test green. The reason it is not
+ * a hole is that the HMAC below still refuses — an attacker cannot produce a matching
+ * signature without the secret. The reason it is not redundant either is what happens on
+ * the way there: `Number('abc')` is NaN, and `Math.abs(NaN) > tolerance` is FALSE, so a
+ * malformed timestamp sails straight through the freshness window that exists to stop
+ * replays. The shape check is the only thing standing between a garbage `t=` and the
+ * replay defence being silently skipped.
+ */
+it('rejects a timestamp that is not a number, rather than letting NaN pass the freshness window', async () => {
+  const body = '{"event":"user.created"}';
+  const now = Math.floor(Date.now() / 1000);
+  // A real signature over the malformed header value, so the only thing that can refuse
+  // this is the shape check — not the HMAC.
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`abc.${body}`));
+  const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  expect(await verifyWebhook({ payload: body, signatureHeader: `t=abc,v1=${hex}`, secret, now })).toBe(false);
+});
+
+it('rejects an empty timestamp for the same reason', async () => {
+  const body = '{"event":"user.created"}';
+  expect(
+    await verifyWebhook({
+      payload: body,
+      signatureHeader: 't=,v1=deadbeef',
+      secret,
+      now: Math.floor(Date.now() / 1000),
+    }),
+  ).toBe(false);
+});
