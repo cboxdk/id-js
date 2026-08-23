@@ -12,6 +12,7 @@ export const discovery = {
   introspection_endpoint: `${ISSUER}/oauth/introspect`,
   revocation_endpoint: `${ISSUER}/oauth/revoke`,
   end_session_endpoint: `${ISSUER}/oauth/logout`,
+  device_authorization_endpoint: `${ISSUER}/oauth/device_authorization`,
 };
 
 function json(body: unknown, status = 200): Response {
@@ -53,6 +54,17 @@ export interface FakeInstance {
    * portal answers, and is the case where the SDK must NOT invent an error code.
    */
   failNextToken(body: unknown, status: number, headers?: Record<string, string>): void;
+  /**
+   * What the device endpoint answers, and what the token endpoint answers to each
+   * device_code poll IN ORDER — so a test can make the person take three rounds to
+   * approve, or decline, and assert what the SDK did in between.
+   */
+  setDeviceFlow(options: {
+    authorization?: Record<string, unknown>;
+    polls?: Array<{ body: Record<string, unknown>; status: number }>;
+  }): void;
+  /** How many times the token endpoint was polled with a device_code. */
+  devicePolls(): number;
   fetchMock: ReturnType<typeof vi.fn>;
 }
 
@@ -111,6 +123,18 @@ export async function fakeInstance(
   };
 
   let revocation: RecordedRequest | null = null;
+  let deviceAuthorization: Record<string, unknown> = {
+    device_code: 'device-abc',
+    user_code: 'WDJB-MJHT',
+    verification_uri: `${ISSUER}/device`,
+    verification_uri_complete: `${ISSUER}/device?user_code=WDJB-MJHT`,
+    expires_in: 600,
+    // Zero so the suite does not actually wait; the interval's own handling is asserted
+    // by what the SDK SENDS and how it reacts to slow_down, not by wall-clock delay.
+    interval: 0,
+  };
+  let devicePolls: Array<{ body: Record<string, unknown>; status: number }> = [];
+  let devicePollCount = 0;
   // A one-shot failure for the token endpoint, so a test can assert what the SDK makes of
   // an RFC 6749 §5.2 error body without permanently breaking the fake for the next call.
   let nextTokenFailure: { body: unknown; status: number; headers?: Record<string, string> } | null = null;
@@ -143,7 +167,20 @@ export async function fakeInstance(
       if (body.get('grant_type') === 'client_credentials') {
         return json({ access_token: 'machine-token', token_type: 'Bearer' });
       }
+      if (body.get('grant_type') === 'urn:ietf:params:oauth:grant-type:device_code') {
+        const scripted = devicePolls[devicePollCount];
+        devicePollCount += 1;
+
+        if (scripted !== undefined) {
+          return json(scripted.body, scripted.status);
+        }
+
+        return json(tokenResponse);
+      }
       return json(tokenResponse);
+    }
+    if (url === discovery.device_authorization_endpoint) {
+      return json(deviceAuthorization);
     }
     if (url === discovery.userinfo_endpoint) {
       return json(
@@ -181,6 +218,16 @@ export async function fakeInstance(
     foreignIdToken,
     setTokenResponse,
     failNextToken,
+    setDeviceFlow: (options) => {
+      if (options.authorization !== undefined) {
+        deviceAuthorization = options.authorization;
+      }
+      if (options.polls !== undefined) {
+        devicePolls = options.polls;
+      }
+      devicePollCount = 0;
+    },
+    devicePolls: () => devicePollCount,
     fetchMock,
   };
 }

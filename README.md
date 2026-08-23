@@ -90,6 +90,44 @@ const user = await client.authenticate({
 });
 ```
 
+## From a CLI (device flow)
+
+A command-line tool has no browser to redirect, and neither does a CI job, a container or
+a TV app. The device authorization grant (RFC 8628) is for all of them: your program
+prints a short code, the person approves it on whatever device is already in their hand,
+and your program collects the tokens.
+
+Register the app as **"CLI or device"** in the console. It is issued **no secret** — a
+binary on somebody's laptop cannot keep one — and has **no redirect URI**, so neither
+appears here:
+
+```ts
+import { CboxIdClient } from '@cboxdk/id-js';
+
+const cbox = new CboxIdClient({
+  issuer: process.env.CBOX_ID_ISSUER!,
+  clientId: process.env.CBOX_ID_CLIENT_ID!,
+  scopes: ['openid', 'profile', 'email', 'offline_access'],
+});
+
+const auth = await cbox.requestDeviceAuthorization();
+console.log(`Open ${auth.verificationUri} and enter ${auth.userCode}`);
+
+// Blocks until they approve. Honours the server's interval, backs off on `slow_down`,
+// and stops on a decline or an expired code. Pass an AbortSignal so Ctrl-C works.
+const user = await cbox.pollDeviceToken(auth);
+console.log(`Signed in as ${user.email}`);
+// Persist user.refreshToken (mode 0600) so the next run does not ask again.
+```
+
+The scopes are bounded by what the app is **registered** for: a device request naming one
+outside that ceiling is refused with `invalid_scope` rather than quietly reduced, because
+no browser is in front of it to notice a smaller grant. Keep `offline_access` unless you
+want the person re-approving every hour.
+
+See [Sign in from a CLI](https://github.com/cboxdk/cbox-id/blob/main/docs/getting-started/sign-in-from-a-cli.md)
+for the protocol itself and where to store the tokens.
+
 ## In the browser (publishable keys)
 
 Everything above needs a server: it holds your client secret. A **publishable key** is the

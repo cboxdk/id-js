@@ -14,8 +14,17 @@ export interface CboxIdConfig {
    * PKCE login.
    */
   clientSecret?: string;
-  /** Your callback URL — must exactly match one registered on the client. */
-  redirectUri: string;
+  /**
+   * Your callback URL — must exactly match one registered on the client.
+   *
+   * OPTIONAL, because not every flow has one. The device grant (RFC 8628) exists
+   * precisely for programs with no browser to be returned to, so a CLI has none to give;
+   * requiring it here made every CLI invent `'http://localhost'` and note that it is
+   * unused. It is required by {@link CboxIdClient.createAuthorizationRequest} and
+   * {@link CboxIdClient.authenticate}, which is where its absence actually breaks
+   * something.
+   */
+  redirectUri?: string;
   /** Scopes requested at login. Defaults to `['openid', 'profile', 'email']`. */
   scopes?: string[];
   /**
@@ -51,6 +60,25 @@ export interface DiscoveryDocument {
   introspection_endpoint?: string;
   revocation_endpoint?: string;
   end_session_endpoint?: string;
+  device_authorization_endpoint?: string;
+}
+
+/**
+ * A pending device authorization (RFC 8628) — what a CLI shows the person while it waits.
+ */
+export interface DeviceAuthorization {
+  /** The secret this program polls with. Never show it to the person. */
+  deviceCode: string;
+  /** The short code the person types on the verification page. */
+  userCode: string;
+  /** Where the person goes to approve. Print this. */
+  verificationUri: string;
+  /** The same page with the code filled in — for a clickable link or a QR code. */
+  verificationUriComplete: string | null;
+  /** Seconds until the code stops being valid. */
+  expiresIn: number;
+  /** The minimum seconds between polls. Never poll faster; the server will say so. */
+  interval: number;
 }
 
 /**

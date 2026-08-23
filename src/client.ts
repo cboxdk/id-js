@@ -6,6 +6,7 @@ import { challenge, createVerifier, randomToken } from './pkce.js';
 import type {
   AuthorizationRequest,
   CboxIdConfig,
+  DeviceAuthorization,
   CboxOrganization,
   CboxUser,
   RefreshedTokens,
@@ -71,9 +72,6 @@ export class CboxIdClient {
     if (!config.clientId) {
       throw new ConfigurationError('Cbox ID config `clientId` is required.');
     }
-    if (!config.redirectUri) {
-      throw new ConfigurationError('Cbox ID config `redirectUri` is required.');
-    }
     assertSecureIssuer(config.issuer);
     this.discovery = new Discovery(
       config.issuer,
@@ -99,10 +97,22 @@ export class CboxIdClient {
     const state = options.state ?? randomToken(16);
     const nonce = randomToken(16);
 
+    const redirectUri = options.redirectUri ?? this.config.redirectUri;
+
+    if (redirectUri === undefined || redirectUri === '') {
+      // Checked where it is needed rather than at construction, so a CLI can build a
+      // client at all. An authorize URL without `redirect_uri` would fail at the
+      // authorization server instead, describing a request the caller never knowingly
+      // made — see the device grant, which has no callback to name.
+      throw new ConfigurationError(
+        'A `redirectUri` is required to start the browser sign-in flow. Set it in the config, or pass it to createAuthorizationRequest.',
+      );
+    }
+
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: this.config.clientId,
-      redirect_uri: options.redirectUri ?? this.config.redirectUri,
+      redirect_uri: redirectUri,
       scope: (options.scopes ?? this.scopes()).join(' '),
       state,
       nonce,
@@ -188,6 +198,22 @@ export class CboxIdClient {
       );
     }
 
+    return await this.identityFrom(tokens, verified);
+  }
+
+  /**
+   * Turn a token response into the verified {@link CboxUser} every flow returns.
+   *
+   * Shared by the browser flow and the device flow rather than written twice: the checks
+   * in here — the UserInfo subject matching the id_token's, the merge that lets UserInfo
+   * enrich but never overwrite signed claims — are the ones that decide whether an
+   * identity is trustworthy. A second copy is a second place for one of them to be
+   * quietly missing, and the flow it was missing from would look exactly as correct.
+   */
+  private async identityFrom(
+    tokens: TokenResponse,
+    verified: Record<string, unknown>,
+  ): Promise<CboxUser> {
     const profile = await this.userinfo(tokens.access_token);
 
     // OIDC Core §5.3.2: the UserInfo `sub` MUST match the id_token's, and when it does
@@ -227,6 +253,152 @@ export class CboxIdClient {
       idToken: tokens.id_token ?? null,
       expiresIn: typeof tokens.expires_in === 'number' ? tokens.expires_in : 0,
     };
+  }
+
+  /**
+   * Start the device authorization grant (RFC 8628) — the flow for a program with no
+   * browser of its own: a CLI, a CI job, a container, a TV.
+   *
+   * Print `userCode` and `verificationUri`, then call
+   * {@link CboxIdClient.pollDeviceToken}. If the machine has a desktop you may also open
+   * `verificationUriComplete`, which fills the code in — but print the code anyway: the
+   * machine running your program is often not the one the person is looking at.
+   *
+   * The scopes are bounded by what the app is REGISTERED for. A device request naming one
+   * outside that ceiling is refused with `invalid_scope` rather than quietly reduced,
+   * because no browser is in front of it to notice a smaller grant.
+   *
+   * @throws ConfigurationError when the instance advertises no device endpoint.
+   */
+  async requestDeviceAuthorization(scopes?: string[]): Promise<DeviceAuthorization> {
+    const endpoint = await this.discovery.optionalEndpoint('device_authorization_endpoint');
+
+    if (endpoint === null) {
+      throw new ConfigurationError(
+        'This instance does not advertise a device_authorization_endpoint, so it does not support CLI sign-in.',
+      );
+    }
+
+    const body = new URLSearchParams({
+      client_id: this.config.clientId,
+      scope: (scopes ?? this.scopes()).join(' '),
+    });
+    if (this.config.clientSecret) {
+      body.set('client_secret', this.config.clientSecret);
+    }
+
+    const response = await this.post(endpoint, body);
+    if (!response.ok) {
+      throw await oauthError(response, 'Device authorization request failed');
+    }
+
+    const payload = (await response.json()) as Record<string, unknown>;
+
+    const deviceCode = payload['device_code'];
+    const userCode = payload['user_code'];
+    const verificationUri = payload['verification_uri'];
+
+    if (typeof deviceCode !== 'string' || typeof userCode !== 'string' || typeof verificationUri !== 'string') {
+      throw new AuthenticationError('The device authorization response was incomplete.');
+    }
+
+    return {
+      deviceCode,
+      userCode,
+      verificationUri,
+      verificationUriComplete:
+        typeof payload['verification_uri_complete'] === 'string'
+          ? payload['verification_uri_complete']
+          : null,
+      expiresIn: typeof payload['expires_in'] === 'number' ? payload['expires_in'] : 600,
+      // RFC 8628 §3.2: absent means 5 seconds. Polling faster than the server allows is
+      // answered with `slow_down`, so the default is the one the server assumes too.
+      interval: typeof payload['interval'] === 'number' ? payload['interval'] : 5,
+    };
+  }
+
+  /**
+   * Poll until the person approves, and return them.
+   *
+   * Blocks. It honours the server's `interval`, backs off permanently by five seconds on
+   * `slow_down` (RFC 8628 §3.5), and stops on the three answers that are final: they
+   * declined, the code expired, or tokens arrived. Pass an `AbortSignal` to give up
+   * early — a CLI should let Ctrl-C work.
+   *
+   * @throws AuthenticationError when the person declines or the code expires.
+   */
+  async pollDeviceToken(
+    authorization: DeviceAuthorization,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CboxUser> {
+    const endpoint = await this.discovery.endpoint('token_endpoint');
+    const deadline = Date.now() + authorization.expiresIn * 1000;
+    let intervalMs = authorization.interval * 1000;
+
+    for (;;) {
+      if (options.signal?.aborted === true) {
+        throw new AuthenticationError('Device sign-in was cancelled.');
+      }
+      if (Date.now() > deadline) {
+        throw new AuthenticationError(
+          'The device code expired before it was approved. Start the sign-in again.',
+        );
+      }
+
+      await sleep(intervalMs, options.signal);
+
+      const body = new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+        device_code: authorization.deviceCode,
+        client_id: this.config.clientId,
+      });
+      if (this.config.clientSecret) {
+        body.set('client_secret', this.config.clientSecret);
+      }
+
+      const response = await this.post(endpoint, body);
+
+      if (response.ok) {
+        const tokens = (await response.json()) as TokenResponse;
+
+        if (!tokens.access_token) {
+          throw new AuthenticationError('The device token response carried no access token.');
+        }
+
+        // No nonce: RFC 8628 has no browser leg to carry one, so there is nothing to
+        // bind. Everything else about the id_token — signature, issuer, audience,
+        // expiry — is verified exactly as it is on the browser flow.
+        const verified = tokens.id_token ? await this.verifyIdToken(tokens.id_token, '') : {};
+
+        return await this.identityFrom(tokens, verified);
+      }
+
+      const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      const error = typeof payload['error'] === 'string' ? payload['error'] : 'invalid_request';
+
+      if (error === 'authorization_pending') {
+        continue;
+      }
+
+      if (error === 'slow_down') {
+        // Permanently, not for one round: the server is telling us our rate is wrong,
+        // and returning to it next tick earns the same answer forever.
+        intervalMs += 5000;
+        continue;
+      }
+
+      if (error === 'access_denied') {
+        throw new AuthenticationError('Sign-in was declined.');
+      }
+
+      if (error === 'expired_token') {
+        throw new AuthenticationError(
+          'The device code expired before it was approved. Start the sign-in again.',
+        );
+      }
+
+      throw await oauthError(response, 'Device sign-in failed');
+    }
   }
 
   /**
@@ -441,10 +613,18 @@ export class CboxIdClient {
   }
 
   private async exchange(code: string, verifier: string, redirectUri?: string): Promise<TokenResponse> {
+    const callback = redirectUri ?? this.config.redirectUri;
+
+    if (callback === undefined || callback === '') {
+      throw new ConfigurationError(
+        'A `redirectUri` is required to exchange an authorization code. It must be the same one the authorization request used.',
+      );
+    }
+
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: redirectUri ?? this.config.redirectUri,
+      redirect_uri: callback,
       client_id: this.config.clientId,
       code_verifier: verifier,
     });
@@ -593,4 +773,32 @@ function parseOrganizations(claim: unknown): CboxOrganization[] | undefined {
     }
   }
   return orgs;
+}
+
+/**
+ * Wait, but stay interruptible.
+ *
+ * A CLI that ignores Ctrl-C for five seconds at a time feels broken, and a bare
+ * `setTimeout` promise cannot be cancelled — so the abort is wired to the same timer
+ * rather than checked after it.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new AuthenticationError('Device sign-in was cancelled.'));
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new AuthenticationError('Device sign-in was cancelled.'));
+    };
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
