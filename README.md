@@ -90,6 +90,128 @@ const user = await client.authenticate({
 });
 ```
 
+## Organizations
+
+A sign-in can be bound to one organization. The tokens then carry `org`, `org_name`, the
+person's membership tier in it (`org_role`), and the app `roles` / `permissions` they hold
+**there** — so switching organization means a new authorization, not a flag on the old
+session.
+
+```ts
+// Bind to an organization you already know (the person must be an active member):
+await client.createAuthorizationRequest({ organization: 'org_2x…' });
+
+// Always show the hosted organization picker, with your guess preselected:
+await client.createAuthorizationRequest({
+  prompt: 'select_organization',
+  organizationHint: 'org_2x…',
+});
+
+// Hosted "create a team" step; the person becomes its owner and the sign-in
+// continues bound to the new organization:
+await client.createAuthorizationRequest({ prompt: 'create_organization' });
+```
+
+| Option | Sent as | Meaning |
+|---|---|---|
+| `organization` | `organization` | Bind the sign-in to this organization. |
+| `organizationHint` | `organization_hint` | Preselect it in the picker; the person may choose another. |
+| `prompt: 'select_organization'` | `prompt=select_organization` | Always show the picker. |
+| `prompt: 'create_organization'` | `prompt=create_organization` | Create an organization first. |
+
+`organization` cannot be combined with either organization prompt — it has already made
+the choice they ask the person to make — and the SDK refuses the combination rather than
+sending it. Use `organizationHint` with the picker instead.
+
+### Switching
+
+`switchOrganization(id)` is `createAuthorizationRequest({ organization: id })` under a name
+that says what it is for. Persist and redirect exactly as for a sign-in; Cbox ID already
+has the person's session, so they normally come straight back without seeing a form.
+
+```ts
+// app/auth/switch-organization/route.ts (Next.js)
+import { NextResponse, type NextRequest } from 'next/server';
+import { cboxId } from '@/lib/cbox';
+
+export async function GET(request: NextRequest) {
+  const org = request.nextUrl.searchParams.get('org');
+  if (!org) return NextResponse.redirect(new URL('/', request.url));
+  return cboxId.switchOrganization(org);
+}
+```
+
+**The binding is checked, not trusted.** The request echoes `organization`; persist it with
+`state`, `codeVerifier` and `nonce` and pass it back as `stored.organization`, and
+`authenticate()` refuses tokens for any other organization. (The Next.js adapter does this
+in a cookie for you.) An instance that predates organization selection ignores the
+parameter and answers for whichever organization the session already had — without the
+check, your app would show the new organization's name over the old one's data.
+
+Replace your session with the user the callback returns rather than patching the old one:
+`org_role`, `roles` and `permissions` can all differ between organizations. A person who
+is not (or no longer) an active member comes back with `error=access_denied`:
+
+```ts
+import { AuthenticationError } from '@cboxdk/id-js';
+
+try {
+  user = await cboxId.callback(request);
+} catch (e) {
+  if (e instanceof AuthenticationError && e.error === 'access_denied') {
+    // Not a member of that organization — send them back to the one they were in.
+  }
+}
+```
+
+### Listing a person's organizations
+
+Request the `organizations` scope and `user.organizations` lists every organization the
+person is an active member of — `{ id, name, role }` — for an organization switcher. It is
+a separate scope because it discloses memberships across unrelated customers; a plain
+`profile` sign-in does not get it.
+
+### Reading the claims
+
+The signed-in user carries them typed:
+
+```ts
+user.organization; // { id, name, role } | null — role is 'owner' | 'admin' | 'developer' | 'member' | 'viewer' | null
+user.roles;        // string[]
+user.permissions;  // string[]
+user.actor;        // { sub, actor } | null — see support sessions below
+```
+
+The same helpers work on the user and on a claim set you verified yourself, such as an
+access token's payload on a resource server:
+
+```ts
+import { organization, hasPermission, hasRole, isSupportSession } from '@cboxdk/id-js';
+
+if (!hasPermission(payload, 'invoices:create')) return forbidden();
+if (organization(user)?.role === 'owner') showBilling();
+```
+
+Matching is exact — `invoices:*` does not grant `invoices:delete`. An `org_role` this SDK
+version does not recognise reads as `null`, never as a tier it would have to guess.
+
+### Support sessions
+
+A staff member can act as one of your users for a limited time (at most an hour, no refresh
+token, with a recorded reason). Those tokens carry the RFC 8693 `act` claim naming the
+staff member, and `isSupportSession()` reports it:
+
+```ts
+if (isSupportSession(user)) {
+  // Show a banner, and refuse what a helper should never do on someone's behalf:
+  // changing their password, their email, their payout details.
+}
+```
+
+It is **fail-closed**: any `act` claim counts, including one whose shape the SDK cannot
+read (`user.actor.sub` is then `null`). A claim it cannot parse is not evidence that nobody
+else is at the keyboard.
+
 ## From a CLI (device flow)
 
 A command-line tool has no browser to redirect, and neither does a CI job, a container or
