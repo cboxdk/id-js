@@ -1,3 +1,5 @@
+import type { CboxActiveOrganization, CboxActor } from './claims.js';
+
 /** Configuration for a {@link CboxIdClient}. */
 export interface CboxIdConfig {
   /**
@@ -88,6 +90,59 @@ export interface DeviceAuthorization {
 export type TokenTypeHint = 'access_token' | 'refresh_token';
 
 /**
+ * An OIDC `prompt` value Cbox ID understands. The first four are OIDC Core §3.1.2.1; the
+ * last two are Cbox ID's organization steps:
+ *
+ * - `select_organization` — always show the hosted organization picker, even to someone
+ *   in a single organization.
+ * - `create_organization` — the hosted "create a team" step: the person creates an
+ *   organization, becomes its owner, and the sign-in continues bound to it.
+ */
+export type AuthorizationPrompt =
+  | 'none'
+  | 'login'
+  | 'consent'
+  | 'select_account'
+  | 'select_organization'
+  | 'create_organization';
+
+/** Options for {@link CboxIdClient.createAuthorizationRequest}. */
+export interface AuthorizationRequestOptions {
+  /** Scopes for this sign-in; defaults to the configured set. */
+  scopes?: string[];
+  /** Overrides the configured callback for this sign-in. */
+  redirectUri?: string;
+  /** Your own `state`; a random one is generated when omitted. */
+  state?: string;
+  /**
+   * One prompt, or several (sent space-separated). `none` cannot be combined with
+   * anything else — OIDC Core §3.1.2.1 makes that an error at the server, so it is
+   * refused here, where the stack trace still points at your code.
+   */
+  prompt?: AuthorizationPrompt | readonly AuthorizationPrompt[];
+  /** Prefills the email on the sign-in page (`login_hint`). */
+  loginHint?: string;
+  /** Demand an authentication no older than this many seconds (`max_age`). */
+  maxAge?: number;
+  /**
+   * Bind this sign-in to one organization (`organization`). The person must hold an
+   * active membership in it; if they do not, the callback carries
+   * `error=access_denied` and {@link CboxIdClient.authenticate} throws an
+   * `AuthenticationError` whose `error` is `'access_denied'`.
+   *
+   * This is how an app switches organization: a new authorization bound to the other
+   * one. See {@link CboxIdClient.switchOrganization}.
+   */
+  organization?: string;
+  /**
+   * Preselect an organization in the hosted picker (`organization_hint`) without binding
+   * to it — the person can still choose another. Pair it with
+   * `prompt: 'select_organization'` to always show the picker with your guess on top.
+   */
+  organizationHint?: string;
+}
+
+/**
  * The values {@link CboxIdClient.createAuthorizationRequest} returns. Persist
  * `state`, `codeVerifier` and `nonce` (e.g. in signed, httpOnly cookies) and hand
  * them back to {@link CboxIdClient.authenticate} on the callback.
@@ -104,6 +159,12 @@ export interface AuthorizationRequest {
    * against it — a step-up nobody checks is not a step-up.
    */
   maxAge?: number;
+  /**
+   * Echoed back when you passed `organization`. Persist it and hand it to
+   * {@link CboxIdClient.authenticate}, which then refuses tokens bound to any other
+   * organization — see {@link StoredAuthState.organization}.
+   */
+  organization?: string;
 }
 
 /** The raw token-endpoint response. */
@@ -146,12 +207,27 @@ export interface CboxUser {
   id: string;
   email: string | null;
   name: string | null;
-  /** The active organization's id (`org` claim). */
+  /** The active organization's id (`org` claim). Same as `organization?.id`. */
   organizationId: string | null;
   /**
-   * The organizations this user belongs to, when the instance emits an
-   * `organizations` claim. Undefined when the claim is absent (single-org apps, or
-   * an instance that doesn't include it). Pass straight to `<OrganizationSwitcher>`.
+   * The organization this session is bound to — id, name and the person's membership
+   * tier in it (`org`, `org_name`, `org_role`) — or null when it is bound to none.
+   */
+  organization: CboxActiveOrganization | null;
+  /** App roles held in this session (`roles` claim); empty when there are none. */
+  roles: string[];
+  /** Permissions held in this session (`permissions` claim); empty when there are none. */
+  permissions: string[];
+  /**
+   * Set when this is a SUPPORT SESSION — a staff member acting as this person (the RFC
+   * 8693 `act` claim). Null for an ordinary sign-in. Show it: see `isSupportSession()`.
+   */
+  actor: CboxActor | null;
+  /**
+   * The organizations this user belongs to — the UserInfo `organizations` claim, which
+   * Cbox ID only sends when you requested the `organizations` scope (it lists every
+   * organization the person is in, so a plain `profile` sign-in does not get it).
+   * Undefined when the claim is absent. Pass straight to `<OrganizationSwitcher>`.
    */
   organizations?: CboxOrganization[];
   claims: Record<string, unknown>;

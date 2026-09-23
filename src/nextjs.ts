@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { CboxIdClient } from './client.js';
 import { ConfigurationError } from './errors.js';
-import type { CboxIdConfig, CboxUser } from './types.js';
+import type { AuthorizationRequest, AuthorizationRequestOptions, CboxIdConfig, CboxUser } from './types.js';
 
 /**
  * First-class Next.js (App Router) adapter for {@link CboxIdClient}. It wires the
@@ -28,6 +28,8 @@ const COOKIE = {
   // The step-up requirement has to survive the redirect like the nonce does: a
   // `maxAge` the callback cannot see is a `maxAge` nothing verifies.
   maxAge: 'cbox_id_max_age',
+  // Likewise the organization a switch bound to: the callback refuses tokens for another.
+  organization: 'cbox_id_organization',
 } as const;
 
 const TEMP_COOKIE_MAX_AGE = 600; // 10 minutes
@@ -42,12 +44,14 @@ export interface CboxIdNext {
    * step-up you want before a payment or an admin grant. It round-trips in a cookie
    * and {@link CboxIdNext.callback} verifies the id_token's `auth_time` against it.
    */
-  signIn(options?: {
-    scopes?: string[];
-    prompt?: string;
-    loginHint?: string;
-    maxAge?: number;
-  }): Promise<NextResponse>;
+  signIn(options?: SignInOptions): Promise<NextResponse>;
+  /**
+   * Redirect to a new sign-in bound to another organization — the handler behind an
+   * organization switcher. See {@link CboxIdClient.switchOrganization}: a person who is
+   * not an active member comes back with `error=access_denied`, and {@link callback}
+   * throws an `AuthenticationError` whose `error` is `'access_denied'`.
+   */
+  switchOrganization(organizationId: string, options?: Omit<SignInOptions, 'organization' | 'organizationHint'>): Promise<NextResponse>;
   /** Complete login on your callback route; returns the authenticated user. */
   callback(request: NextRequest): Promise<CboxUser>;
   /** The hosted profile-page URL (`return_to` appended when given). */
@@ -61,6 +65,12 @@ export interface CboxIdNext {
    */
   signOutUrl(returnTo?: string, idTokenHint?: string): Promise<string | null>;
 }
+
+/**
+ * What {@link CboxIdNext.signIn} accepts: every authorization option except the callback
+ * and `state`, which the adapter owns because it stores them in cookies.
+ */
+export type SignInOptions = Omit<AuthorizationRequestOptions, 'redirectUri' | 'state'>;
 
 /**
  * Build a Next.js adapter. Pass a config, or omit it to read from the environment
@@ -79,24 +89,41 @@ export function createCboxId(config?: Partial<CboxIdConfig>): CboxIdNext {
     maxAge: TEMP_COOKIE_MAX_AGE,
   };
 
+  // One place that stashes PKCE/state/nonce, so a switch cannot forget what a sign-in
+  // stores — a missing verifier cookie fails the callback, a missing max-age cookie
+  // silently skips the step-up check.
+  const redirectTo = (request: AuthorizationRequest): NextResponse => {
+    const response = NextResponse.redirect(request.url);
+    response.cookies.set(COOKIE.state, request.state, tempCookieOptions);
+    response.cookies.set(COOKIE.verifier, request.codeVerifier, tempCookieOptions);
+    response.cookies.set(COOKIE.nonce, request.nonce, tempCookieOptions);
+    if (typeof request.maxAge === 'number') {
+      response.cookies.set(COOKIE.maxAge, String(request.maxAge), tempCookieOptions);
+    }
+    if (request.organization !== undefined) {
+      response.cookies.set(COOKIE.organization, request.organization, tempCookieOptions);
+    } else {
+      // A plain sign-in after an abandoned switch must not inherit its binding.
+      response.cookies.delete(COOKIE.organization);
+    }
+    return response;
+  };
+
   return {
     client,
 
     async signIn(options = {}) {
-      const request = await client.createAuthorizationRequest(options);
-      const response = NextResponse.redirect(request.url);
-      response.cookies.set(COOKIE.state, request.state, tempCookieOptions);
-      response.cookies.set(COOKIE.verifier, request.codeVerifier, tempCookieOptions);
-      response.cookies.set(COOKIE.nonce, request.nonce, tempCookieOptions);
-      if (typeof request.maxAge === 'number') {
-        response.cookies.set(COOKIE.maxAge, String(request.maxAge), tempCookieOptions);
-      }
-      return response;
+      return redirectTo(await client.createAuthorizationRequest(options));
+    },
+
+    async switchOrganization(organizationId, options = {}) {
+      return redirectTo(await client.switchOrganization(organizationId, options));
     },
 
     async callback(request) {
       const storedMaxAge = request.cookies.get(COOKIE.maxAge)?.value;
       const maxAge = storedMaxAge !== undefined ? Number(storedMaxAge) : undefined;
+      const organization = request.cookies.get(COOKIE.organization)?.value;
 
       return client.authenticate({
         params: {
@@ -110,6 +137,7 @@ export function createCboxId(config?: Partial<CboxIdConfig>): CboxIdNext {
           codeVerifier: request.cookies.get(COOKIE.verifier)?.value ?? '',
           nonce: request.cookies.get(COOKIE.nonce)?.value ?? '',
           ...(maxAge !== undefined && Number.isFinite(maxAge) ? { maxAge } : {}),
+          ...(organization !== undefined && organization !== '' ? { organization } : {}),
         },
       });
     },
