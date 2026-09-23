@@ -26,6 +26,13 @@ at the callback instead of silently landing in the old organization (see below).
 - Claim helpers that work on a `CboxUser` or on a claim set you verified yourself:
   `organization()`, `actor()`, `isSupportSession()`, `roles()`, `permissions()`,
   `hasRole()`, `hasPermission()`.
+- Staff roles: `tenantAssignable: false` on a `RoleDefinition` publishes the role as
+  staff-only (`tenant_assignable: false`), which Cbox ID never offers or accepts on an
+  organization's own admin pages.
+- Self-serve permissions: `tenantAssignable: true` on a `PermissionDefinition` publishes it
+  as one an organization's administrators may put in their own custom roles
+  (`tenant_assignable: true`). Permissions stay internal by default.
+- Exported wire types `ManifestPermission` and `ManifestRole`.
 - Exported types `AuthorizationPrompt`, `AuthorizationRequestOptions`,
   `OrganizationRole`, `CboxActiveOrganization`, `CboxActor`, `ClaimSource`,
   `CboxOrganization`, and `SignInOptions` from `@cboxdk/id-js/nextjs`.
@@ -43,5 +50,16 @@ at the callback instead of silently landing in the old organization (see below).
 - `organization` together with `prompt: 'select_organization'` or `'create_organization'`,
   or an empty `organization` / `organizationHint`, throws `ConfigurationError` before any
   redirect.
+- The manifest `version` now covers both `tenant_assignable` flags, byte-for-byte as the
+  PHP reference hashes them: present only in their non-default state, so a catalog that
+  never sets them keeps the version it had. The shared cross-SDK fixture gained the
+  `staff_role` and `self_serve_permission` cases.
+- `AuthzManifest.permissions` / `.roles` are typed as the wire shapes (`ManifestPermission`,
+  `ManifestRole`, snake_case flags) rather than as the declaration types.
+- `defineAuthz()` / `buildManifest()` now refuse a key that is not a lowercase
+  `feature:action` slug, and a `tenantAssignable` that is not a boolean, with a
+  `ConfigurationError` — both were refused by the server on push anyway.
+- A role that lists the same permission twice is sent and hashed with it once, as the
+  server stores it; the repeat used to give a `version` no server computes.
 - `CboxUser` has four new required fields. Code that builds a `CboxUser` by hand (test
   fixtures) must add `organization: null, roles: [], permissions: [], actor: null`.

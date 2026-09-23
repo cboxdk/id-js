@@ -494,8 +494,8 @@ claims for you to enforce. Requires the app's client to hold the `apps.manifest`
 ```ts
 import { defineAuthz, publishManifest } from '@cboxdk/id-js';
 
-// Declare the catalog (validated: keys are `feature:action`, roles must reference
-// declared permissions). Keep this next to the code that enforces it.
+// Declare the catalog (validated: keys are lowercase `feature:action` slugs, and roles
+// must reference declared permissions). Keep this next to the code that enforces it.
 export const authz = defineAuthz({
   permissions: [
     { key: 'invoices:create', description: 'Create invoices' },
@@ -519,6 +519,39 @@ const summary = await publishManifest(
 );
 // → { unchanged, roles_declared, permissions_declared, ... }
 ```
+
+### Staff roles and self-serve permissions
+
+Two flags decide who may hand something out:
+
+- **`tenantAssignable: false` on a role** makes it a **staff role** — for your own support
+  or operations people, held environment-wide across every customer. Cbox ID never lists
+  or accepts it on an organization's own admin pages; only an environment administrator
+  can grant it. Roles default to `true`.
+- **`tenantAssignable: true` on a permission** lets an organization's administrators put it
+  in custom roles they build themselves. Permissions default to `false`: internal unless
+  you opt in.
+
+```ts
+export const authz = defineAuthz({
+  permissions: [
+    { key: 'parcels:read', description: 'View parcels', tenantAssignable: true },
+    // Lets a staff member start a support session in this app (see "Support sessions").
+    { key: 'support:impersonate', description: 'Act as a customer' },
+  ],
+  roles: [
+    { key: 'viewer', name: 'Viewer', permissions: ['parcels:read'] },
+    { key: 'support', name: 'Support', description: 'Our support team',
+      permissions: ['support:impersonate', 'parcels:read'], tenantAssignable: false },
+  ],
+});
+```
+
+On the wire the flags are `tenant_assignable`, and only their non-default state is sent
+(`false` on a role, `true` on a permission). Both are part of the manifest's `version`, so
+marking a role staff-only in a new deploy re-syncs it rather than being skipped as
+unchanged. A value that is not a real boolean — the string `"false"` from a YAML file, say
+— is refused, because it would otherwise read as the opposite of what it says.
 
 `publishManifest` mints a client-credentials token (`scope=apps.manifest`) and POSTs
 the manifest to `{issuer}/api/v1/apps/manifest`. It is a server-side operation — keep
