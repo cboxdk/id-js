@@ -180,6 +180,7 @@ user.organization; // { id, name, role } | null — role is 'owner' | 'admin' | 
 user.roles;        // string[]
 user.permissions;  // string[]
 user.actor;        // { sub, actor } | null — see support sessions below
+user.sessionId;    // the id_token's `sid` | null — keep it to match a back-channel logout
 ```
 
 The same helpers work on the user and on a claim set you verified yourself, such as an

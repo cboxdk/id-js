@@ -3,7 +3,7 @@ import { Discovery } from './discovery.js';
 import { assertSecureIssuer } from './issuer.js';
 import { AuthenticationError, ConfigurationError, InvalidStateError, oauthError } from './errors.js';
 import { challenge, createVerifier, randomToken } from './pkce.js';
-import { actor, organization, permissions, roles } from './claims.js';
+import { actor, organization, permissions, roles, sessionId } from './claims.js';
 import type {
   AuthorizationPrompt,
   AuthorizationRequest,
@@ -299,6 +299,7 @@ export class CboxIdClient {
       roles: roles(claims),
       permissions: permissions(claims),
       actor: actor(claims),
+      sessionId: sessionId(claims),
       // Only present when the instance emitted the claim (exactOptionalPropertyTypes).
       ...(organizations ? { organizations } : {}),
       claims,

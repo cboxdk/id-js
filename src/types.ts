@@ -224,6 +224,11 @@ export interface CboxUser {
    */
   actor: CboxActor | null;
   /**
+   * The Cbox ID sign-in session (the ID Token's `sid`), or null when none was sent. Keep
+   * it with your session to match a back-channel logout to it. See `sessionId()`.
+   */
+  sessionId: string | null;
+  /**
    * The organizations this user belongs to — the UserInfo `organizations` claim, which
    * Cbox ID only sends when you requested the `organizations` scope (it lists every
    * organization the person is in, so a plain `profile` sign-in does not get it).

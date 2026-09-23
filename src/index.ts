@@ -29,6 +29,7 @@ export {
   organization,
   actor,
   isSupportSession,
+  sessionId,
   roles,
   permissions,
   hasRole,

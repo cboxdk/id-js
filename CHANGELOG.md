@@ -26,6 +26,8 @@ at the callback instead of silently landing in the old organization (see below).
 - Claim helpers that work on a `CboxUser` or on a claim set you verified yourself:
   `organization()`, `actor()`, `isSupportSession()`, `roles()`, `permissions()`,
   `hasRole()`, `hasPermission()`.
+- `CboxUser.sessionId` and `sessionId()`: the ID Token's `sid`, the sign-in session a
+  back-channel logout token names.
 - Staff roles: `tenantAssignable: false` on a `RoleDefinition` publishes the role as
   staff-only (`tenant_assignable: false`), which Cbox ID never offers or accepts on an
   organization's own admin pages.
@@ -61,5 +63,6 @@ at the callback instead of silently landing in the old organization (see below).
   `ConfigurationError` — both were refused by the server on push anyway.
 - A role that lists the same permission twice is sent and hashed with it once, as the
   server stores it; the repeat used to give a `version` no server computes.
-- `CboxUser` has four new required fields. Code that builds a `CboxUser` by hand (test
-  fixtures) must add `organization: null, roles: [], permissions: [], actor: null`.
+- `CboxUser` has five new required fields. Code that builds a `CboxUser` by hand (test
+  fixtures) must add `organization: null, roles: [], permissions: [], actor: null,
+  sessionId: null`.

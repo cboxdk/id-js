@@ -10,6 +10,7 @@ import {
   organization,
   permissions,
   roles,
+  sessionId,
 } from '../src/index.js';
 import { NextRequest } from 'next/server';
 import { createCboxId } from '../src/nextjs.js';
@@ -227,6 +228,21 @@ describe('typed tenancy claims on the signed-in user', () => {
     expect(user.permissions).toEqual(['invoices:create', 'invoices:read']);
     expect(user.actor).toBeNull();
     expect(isSupportSession(user)).toBe(false);
+    expect(user.sessionId).toBeNull();
+  });
+
+  it('carries the id_token sid, which a back-channel logout names the session by', async () => {
+    const { inst, client } = await clientFor();
+    inst.setTokenResponse({
+      access_token: 'access-1',
+      id_token: await inst.signIdToken({ iss: ISSUER, aud: 'client-abc', sub: 'user-1', nonce: NONCE, sid: 'sess-42' }),
+      expires_in: 3600,
+    });
+
+    const user = await client.authenticate({ params: { code: 'c', state: 'state-1' }, stored });
+
+    expect(user.sessionId).toBe('sess-42');
+    expect(sessionId(user)).toBe('sess-42');
   });
 
   it('marks a support session from the signed act claim', async () => {
@@ -297,6 +313,9 @@ describe('claim helpers on a raw claim set', () => {
     expect(hasRole(payload, 'billing-admin')).toBe(true);
     expect(hasPermission(payload, 'invoices:read')).toBe(true);
     expect(isSupportSession(payload)).toBe(false);
+    expect(sessionId(payload)).toBeNull();
+    expect(sessionId({ sid: '' })).toBeNull();
+    expect(sessionId({ sid: 42 })).toBeNull();
   });
 
   it('matches permissions exactly, with no wildcard expansion', () => {

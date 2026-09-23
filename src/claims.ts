@@ -98,6 +98,20 @@ export function isSupportSession(source: ClaimSource): boolean {
   return actor(source) !== null;
 }
 
+/**
+ * The Cbox ID sign-in session this token came from — the ID Token's `sid` claim — or null
+ * when the instance sent none.
+ *
+ * Store it with your own session: an OIDC Back-Channel Logout token names the session it
+ * ends by this value, and matching on it is how you end the right one (rather than every
+ * session the person has) when they sign out of Cbox ID elsewhere.
+ */
+export function sessionId(source: ClaimSource): string | null {
+  const sid = claimsOf(source)['sid'];
+
+  return typeof sid === 'string' && sid !== '' ? sid : null;
+}
+
 /** The app roles this session holds — the `roles` claim; empty when there are none. */
 export function roles(source: ClaimSource): string[] {
   return stringList(claimsOf(source)['roles']);
