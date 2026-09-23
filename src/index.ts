@@ -46,6 +46,8 @@ export type {
   RoleDefinition,
   AuthzDeclaration,
   AuthzManifest,
+  ManifestPermission,
+  ManifestRole,
   ManifestPublisherConfig,
   ManifestSyncSummary,
 } from './authz.js';

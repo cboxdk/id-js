@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,14 +7,23 @@ import {
   ConfigurationError,
   defineAuthz,
   publishManifest,
+  type AuthzDeclaration,
+  type PermissionDefinition,
+  type RoleDefinition,
 } from '../src/index.js';
 import { canonicalManifestJson } from '../src/authz.js';
 import { discovery, ISSUER } from './helpers.js';
 
 interface FixtureCase {
   name: string;
-  permissions: { key: string; description: string | null }[];
-  roles: { key: string; name: string; description: string | null; permissions: string[] }[];
+  permissions: { key: string; description: string | null; tenant_assignable?: boolean }[];
+  roles: {
+    key: string;
+    name: string;
+    description: string | null;
+    permissions: string[];
+    tenant_assignable?: boolean;
+  }[];
   canonical_json: string;
   sha256: string;
   version: string;
@@ -84,26 +94,140 @@ describe('buildManifest', () => {
 });
 
 describe('cross-SDK manifest hash fixture', () => {
+  it('carries every case the PHP reference asserts, staff roles and self-serve permissions included', () => {
+    // A stale copy of the fixture passes every case it has; this is what notices the copy.
+    expect(fixture.cases.map((c) => c.name)).toEqual([
+      'empty',
+      'basic',
+      'edge_cases',
+      'staff_role',
+      'self_serve_permission',
+    ]);
+  });
+
   for (const testCase of fixture.cases) {
     it(`matches the PHP reference canonical hash: ${testCase.name}`, async () => {
-      // A null description in the fixture means "not declared" — omit the field.
-      const permissions = testCase.permissions.map((p) =>
-        p.description === null ? { key: p.key } : { key: p.key, description: p.description },
-      );
-      const roles = testCase.roles.map((r) =>
-        r.description === null
-          ? { key: r.key, name: r.name, permissions: r.permissions }
-          : { key: r.key, name: r.name, description: r.description, permissions: r.permissions },
-      );
+      // A null description in the fixture means "not declared" — omit the field. The
+      // flags are carried exactly as the fixture states them, absent included: absent and
+      // the default must hash the same.
+      const permissions: PermissionDefinition[] = testCase.permissions.map((p) => ({
+        key: p.key,
+        ...(p.description === null ? {} : { description: p.description }),
+        ...(p.tenant_assignable === undefined ? {} : { tenantAssignable: p.tenant_assignable }),
+      }));
+      const roles: RoleDefinition[] = testCase.roles.map((r) => ({
+        key: r.key,
+        name: r.name,
+        ...(r.description === null ? {} : { description: r.description }),
+        permissions: r.permissions,
+        ...(r.tenant_assignable === undefined ? {} : { tenantAssignable: r.tenant_assignable }),
+      }));
 
       // Byte-for-byte identical canonical serialization to PHP's json_encode.
-      expect(canonicalManifestJson(permissions, roles)).toBe(testCase.canonical_json);
+      const canonical = canonicalManifestJson(permissions, roles);
+      expect(canonical).toBe(testCase.canonical_json);
+      expect(createHash('sha256').update(canonical, 'utf8').digest('hex')).toBe(testCase.sha256);
       // The SDK's own sha256 of those bytes, truncated to 16 hex, matches the fixture.
       const manifest = await buildManifest({ permissions, roles });
       expect(manifest.version).toBe(testCase.version);
       expect(testCase.version).toBe(testCase.sha256.slice(0, 16));
     });
   }
+});
+
+describe('staff roles and self-serve permissions', () => {
+  const catalog = {
+    permissions: [
+      { key: 'support:impersonate', description: 'Act as a customer' },
+      { key: 'parcels:read', description: 'View parcels', tenantAssignable: true },
+    ],
+    roles: [
+      {
+        key: 'support',
+        name: 'Support',
+        permissions: ['support:impersonate', 'parcels:read'],
+        tenantAssignable: false,
+      },
+      { key: 'viewer', name: 'Viewer', permissions: ['parcels:read'] },
+    ],
+  } satisfies AuthzDeclaration;
+
+  it('sends a staff role as tenant_assignable: false, the only key the server reads', async () => {
+    const manifest = await buildManifest(catalog);
+    const support = manifest.roles.find((r) => r.key === 'support') as unknown as Record<string, unknown>;
+
+    expect(support['tenant_assignable']).toBe(false);
+    // Sent camelCase, the server would ignore it and default the role to assignable.
+    expect(support).not.toHaveProperty('tenantAssignable');
+  });
+
+  it('sends a self-serve permission as tenant_assignable: true', async () => {
+    const manifest = await buildManifest(catalog);
+    const read = manifest.permissions.find((p) => p.key === 'parcels:read') as unknown as Record<string, unknown>;
+
+    expect(read['tenant_assignable']).toBe(true);
+    expect(read).not.toHaveProperty('tenantAssignable');
+  });
+
+  it('leaves both flags off the wire in their default state', async () => {
+    const manifest = await buildManifest({
+      permissions: [{ key: 'parcels:read', tenantAssignable: false }],
+      roles: [{ key: 'viewer', name: 'Viewer', permissions: ['parcels:read'], tenantAssignable: true }],
+    });
+
+    expect(manifest.permissions[0]).toEqual({ key: 'parcels:read' });
+    expect(manifest.roles[0]).toEqual({ key: 'viewer', name: 'Viewer', permissions: ['parcels:read'] });
+  });
+
+  it('changes the version when a role becomes staff-only, so the server does not skip the sync', async () => {
+    const before = await buildManifest({
+      permissions: catalog.permissions,
+      roles: catalog.roles.map(({ tenantAssignable: _, ...role }) => role),
+    });
+    const after = await buildManifest(catalog);
+
+    expect(after.version).not.toBe(before.version);
+  });
+
+  it('changes the version when a permission becomes self-serve', async () => {
+    const before = await buildManifest({
+      permissions: catalog.permissions.map(({ tenantAssignable: _, ...permission }) => permission),
+      roles: catalog.roles,
+    });
+    const after = await buildManifest(catalog);
+
+    expect(after.version).not.toBe(before.version);
+  });
+
+  it('hashes a repeated permission ref as the server does, once', async () => {
+    const once = await buildManifest({
+      permissions: [{ key: 'parcels:read' }],
+      roles: [{ key: 'viewer', name: 'Viewer', permissions: ['parcels:read'] }],
+    });
+    const twice = await buildManifest({
+      permissions: [{ key: 'parcels:read' }],
+      roles: [{ key: 'viewer', name: 'Viewer', permissions: ['parcels:read', 'parcels:read'] }],
+    });
+
+    expect(twice.version).toBe(once.version);
+    expect(twice.roles[0]!.permissions).toEqual(['parcels:read']);
+  });
+
+  it('refuses a role flag that is not a boolean, which a YAML-loaded "false" would be', () => {
+    const untyped = { key: 'support', name: 'Support', permissions: [], tenantAssignable: 'false' };
+
+    expect(() => defineAuthz({ roles: [untyped as unknown as RoleDefinition] })).toThrowError(
+      'Role "support" `tenantAssignable` must be true or false.',
+    );
+  });
+
+  it('refuses a permission flag that is not a boolean', () => {
+    const untyped = { key: 'parcels:read', tenantAssignable: 1 };
+
+    expect(() => defineAuthz({ permissions: [untyped as unknown as PermissionDefinition] })).toThrowError(
+      'Permission "parcels:read" `tenantAssignable` must be true or false.',
+    );
+  });
 });
 
 describe('defineAuthz', () => {
@@ -114,6 +238,15 @@ describe('defineAuthz', () => {
         roles: [{ key: 'admin', name: 'Admin', permissions: ['invoices:delete'] }],
       }),
     ).toThrowError(ConfigurationError);
+  });
+
+  it('rejects a key the server would refuse, where it was written', () => {
+    expect(() => defineAuthz({ permissions: [{ key: 'Invoices:Read' }] })).toThrowError(
+      'Permission key "Invoices:Read" is not a lowercase `feature:action` slug (e.g. `invoices:create`).',
+    );
+    expect(() => defineAuthz({ roles: [{ key: 'billing admin', name: 'Billing', permissions: [] }] })).toThrowError(
+      'Role key "billing admin" is not a lowercase `feature:action` slug (e.g. `invoices:create`).',
+    );
   });
 
   it('rejects duplicate permission keys', () => {
@@ -170,6 +303,33 @@ describe('publishManifest', () => {
     expect(sent.version).toMatch(/^[0-9a-f]{16}$/);
     expect(sent.permissions.map((p) => p.key)).toContain('invoices:create');
     expect(sent.roles.map((r) => r.key)).toEqual(['billing-admin']);
+  });
+
+  it('pushes a staff role over the wire as tenant_assignable: false', async () => {
+    let pushed: unknown;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: unknown, init?: RequestInit): Promise<Response> => {
+        const url = String(input);
+        if (url.endsWith('/.well-known/openid-configuration')) {
+          return json(discovery);
+        }
+        if (url === discovery.token_endpoint) {
+          return json({ access_token: 'manifest-token', token_type: 'Bearer' });
+        }
+        pushed = JSON.parse(String(init?.body));
+        return json({ unchanged: false });
+      }),
+    );
+
+    await publishManifest(config, {
+      permissions: [{ key: 'support:impersonate' }],
+      roles: [{ key: 'support', name: 'Support', permissions: ['support:impersonate'], tenantAssignable: false }],
+    });
+
+    expect((pushed as { roles: unknown[] }).roles).toEqual([
+      { key: 'support', name: 'Support', permissions: ['support:impersonate'], tenant_assignable: false },
+    ]);
   });
 
   it('throws when the server rejects the push', async () => {

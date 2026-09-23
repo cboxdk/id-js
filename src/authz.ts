@@ -8,6 +8,13 @@ import { AuthenticationError, ConfigurationError } from './errors.js';
 export interface PermissionDefinition {
   key: string;
   description?: string;
+  /**
+   * Whether an organization's own administrators may hand this permission out in a custom
+   * role they build themselves (self-serve). Defaults to `false`: a permission is internal
+   * unless you opt it in, so a key added in a hurry never becomes something every customer
+   * can grant. Sent as `tenant_assignable: true`.
+   */
+  tenantAssignable?: boolean;
 }
 
 /**
@@ -19,6 +26,35 @@ export interface RoleDefinition {
   name: string;
   description?: string;
   permissions: string[];
+  /**
+   * Whether an organization's administrators may assign this role to their members.
+   * Defaults to `true`.
+   *
+   * Set `false` for a STAFF role — your own support or operations people, held
+   * environment-wide across every customer (typically the role that grants
+   * `support:impersonate`). Cbox ID never lists or accepts a staff role on the
+   * organization plane; only an environment administrator can grant it. Sent as
+   * `tenant_assignable: false`.
+   */
+  tenantAssignable?: boolean;
+}
+
+/** A permission as it is sent to Cbox ID (snake_case, the manifest's wire format). */
+export interface ManifestPermission {
+  key: string;
+  description?: string;
+  /** Present only for a self-serve permission. See {@link PermissionDefinition.tenantAssignable}. */
+  tenant_assignable?: true;
+}
+
+/** A role as it is sent to Cbox ID (snake_case, the manifest's wire format). */
+export interface ManifestRole {
+  key: string;
+  name: string;
+  description?: string;
+  permissions: string[];
+  /** Present only for a staff role. See {@link RoleDefinition.tenantAssignable}. */
+  tenant_assignable?: false;
 }
 
 /**
@@ -59,8 +95,8 @@ export interface LegacyLoginDeclaration {
  */
 export interface AuthzManifest {
   version: string;
-  permissions: PermissionDefinition[];
-  roles: RoleDefinition[];
+  permissions: ManifestPermission[];
+  roles: ManifestRole[];
   legacy_login?: LegacyLoginDeclaration;
 }
 
@@ -122,12 +158,9 @@ export function defineAuthz(
  * sorted by key first, so declaration order never changes the version.
  */
 export async function buildManifest(declaration: AuthzDeclaration): Promise<AuthzManifest> {
-  const permissions = (declaration.permissions ?? []).map(canonicalPermission);
-  const roles = (declaration.roles ?? []).map(canonicalRole);
+  const permissions = declaration.permissions ?? [];
+  const roles = declaration.roles ?? [];
   assertDeclaration(permissions, roles);
-
-  permissions.sort((a, b) => byteCompare(a.key, b.key));
-  roles.sort((a, b) => byteCompare(a.key, b.key));
 
   // The version hashes the CATALOG only, and the legacy login is deliberately outside it:
   // this canonicalization is a cross-SDK contract — id-js, id-python, id-go and the PHP
@@ -135,7 +168,11 @@ export async function buildManifest(declaration: AuthzDeclaration): Promise<Auth
   // drifting. The server compares a declared url separately for the same reason.
   const version = (await sha256Hex(canonicalManifestJson(permissions, roles))).slice(0, 16);
 
-  const manifest: AuthzManifest = { version, permissions, roles };
+  const manifest: AuthzManifest = {
+    version,
+    permissions: [...permissions].sort((a, b) => byteCompare(a.key, b.key)).map(wirePermission),
+    roles: [...roles].sort((a, b) => byteCompare(a.key, b.key)).map(wireRole),
+  };
 
   if (declaration.legacyLogin) {
     assertLegacyLogin(declaration.legacyLogin);
@@ -223,15 +260,24 @@ async function mintToken(
   return json.access_token;
 }
 
+/**
+ * A `feature:action` (or bare `feature`) key: lowercase, with dot/colon-separated segments.
+ * The server's own pattern, restated so a bad key fails where it was written rather than
+ * as a 4xx from a manifest push on deploy.
+ */
+const KEY_PATTERN = /^[a-z][a-z0-9_-]*(?:[.:][a-z0-9_-]+)*$/;
+
 function assertDeclaration(permissions: PermissionDefinition[], roles: RoleDefinition[]): void {
   const permissionKeys = new Set<string>();
   for (const permission of permissions) {
     if (!permission.key) {
       throw new ConfigurationError('Every permission needs a non-empty `key`.');
     }
+    assertKey(permission.key, 'Permission');
     if (permissionKeys.has(permission.key)) {
       throw new ConfigurationError(`Permission "${permission.key}" is declared more than once.`);
     }
+    assertFlag(permission.tenantAssignable, `Permission "${permission.key}"`);
     permissionKeys.add(permission.key);
   }
 
@@ -240,12 +286,14 @@ function assertDeclaration(permissions: PermissionDefinition[], roles: RoleDefin
     if (!role.key) {
       throw new ConfigurationError('Every role needs a non-empty `key`.');
     }
+    assertKey(role.key, 'Role');
     if (!role.name) {
       throw new ConfigurationError(`Role "${role.key}" needs a non-empty \`name\`.`);
     }
     if (roleKeys.has(role.key)) {
       throw new ConfigurationError(`Role "${role.key}" is declared more than once.`);
     }
+    assertFlag(role.tenantAssignable, `Role "${role.key}"`);
     roleKeys.add(role.key);
     for (const reference of role.permissions) {
       if (!permissionKeys.has(reference)) {
@@ -257,27 +305,75 @@ function assertDeclaration(permissions: PermissionDefinition[], roles: RoleDefin
   }
 }
 
-/** A permission with keys in a fixed order and no `undefined` fields (stable to hash). */
-function canonicalPermission(permission: PermissionDefinition): PermissionDefinition {
-  return permission.description === undefined
-    ? { key: permission.key }
-    : { key: permission.key, description: permission.description };
+function assertKey(key: string, what: 'Permission' | 'Role'): void {
+  if (!KEY_PATTERN.test(key)) {
+    throw new ConfigurationError(
+      `${what} key "${key}" is not a lowercase \`feature:action\` slug (e.g. \`invoices:create\`).`,
+    );
+  }
 }
 
-/** A role with keys in a fixed order, sorted permission refs, and no `undefined` fields. */
-function canonicalRole(role: RoleDefinition): RoleDefinition {
-  const permissions = [...role.permissions].sort(byteCompare);
-  return role.description === undefined
-    ? { key: role.key, name: role.name, permissions }
-    : { key: role.key, name: role.name, description: role.description, permissions };
+/**
+ * `tenantAssignable`, when given, must be a real boolean.
+ *
+ * The type says so, but a catalog loaded from YAML or JSON arrives untyped, and the
+ * string `"false"` is truthy: the one value that has to mean "staff only" would read as
+ * "every customer may grant this". The server refuses a non-boolean role flag for the
+ * same reason; refusing it here puts the failure in the deploy that introduced it.
+ */
+function assertFlag(value: unknown, owner: string): void {
+  if (value !== undefined && typeof value !== 'boolean') {
+    throw new ConfigurationError(`${owner} \`tenantAssignable\` must be true or false.`);
+  }
+}
+
+/**
+ * A permission in the manifest's wire format: fixed key order, no `undefined` fields.
+ *
+ * `tenant_assignable` is written only when it is `true`, the non-default. The server reads
+ * the snake_case key and nothing else, so this mapping is the whole difference between a
+ * self-serve permission and an internal one — `tenantAssignable` sent as-is would be
+ * ignored.
+ */
+function wirePermission(permission: PermissionDefinition): ManifestPermission {
+  return {
+    key: permission.key,
+    ...(permission.description === undefined ? {} : { description: permission.description }),
+    ...(permission.tenantAssignable === true ? { tenant_assignable: true as const } : {}),
+  };
+}
+
+/**
+ * A role in the manifest's wire format: fixed key order, de-duplicated and sorted
+ * permission refs, no `undefined` fields.
+ *
+ * `tenant_assignable: false` is written only for a staff role. THIS IS THE LINE THAT
+ * KEEPS A STAFF ROLE STAFF-ONLY: the server defaults an absent key to assignable, so a
+ * camelCase `tenantAssignable: false` passed straight through would publish your support
+ * role as one every customer's administrator can hand out.
+ */
+function wireRole(role: RoleDefinition): ManifestRole {
+  return {
+    key: role.key,
+    name: role.name,
+    ...(role.description === undefined ? {} : { description: role.description }),
+    permissions: uniqueSorted(role.permissions),
+    ...(role.tenantAssignable === false ? { tenant_assignable: false as const } : {}),
+  };
 }
 
 /**
  * Serialize {permissions, roles} to the exact canonical JSON the PHP reference hashes,
  * so the `version` is byte-for-byte identical across every Cbox ID SDK. Matches PHP
  * `json_encode` defaults: object keys in insertion order, permissions and roles sorted
- * by key, each role's permission refs sorted, an absent-or-empty description emitted as
- * `null`, forward slashes escaped as `\/`, and every non-ASCII code unit as `\uXXXX`.
+ * by key, each role's permission refs de-duplicated and sorted, an absent-or-empty
+ * description emitted as `null`, forward slashes escaped as `\/`, and every non-ASCII
+ * code unit as `\uXXXX`.
+ *
+ * Each `tenant_assignable` flag appears ONLY in its non-default state — `true` on a
+ * permission, `false` on a role — exactly as the reference writes it. That keeps every
+ * catalog that never mentions the flag hashing to the bytes it always has, while a
+ * change to it still changes the version (an unchanged version is a skipped sync).
  */
 export function canonicalManifestJson(
   permissions: PermissionDefinition[],
@@ -286,17 +382,31 @@ export function canonicalManifestJson(
   const canonical = {
     permissions: [...permissions]
       .sort((a, b) => byteCompare(a.key, b.key))
-      .map((p) => ({ key: p.key, description: emptyToNull(p.description) })),
+      .map((p) => ({
+        key: p.key,
+        description: emptyToNull(p.description),
+        ...(p.tenantAssignable === true ? { tenant_assignable: true } : {}),
+      })),
     roles: [...roles]
       .sort((a, b) => byteCompare(a.key, b.key))
       .map((r) => ({
         key: r.key,
         name: r.name,
         description: emptyToNull(r.description),
-        permissions: [...r.permissions].sort(byteCompare),
+        permissions: uniqueSorted(r.permissions),
+        ...(r.tenantAssignable === false ? { tenant_assignable: false } : {}),
       })),
   };
   return escapeLikePhp(JSON.stringify(canonical));
+}
+
+/**
+ * Permission refs as the server stores them: each once, sorted. The server drops a
+ * repeated ref before it hashes, so hashing the repeat here would give a `version` that
+ * no server ever computes.
+ */
+function uniqueSorted(values: readonly string[]): string[] {
+  return [...new Set(values)].sort(byteCompare);
 }
 
 /** PHP treats an absent or empty description as `null` in the hashed catalog. */
