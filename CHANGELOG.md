@@ -3,7 +3,7 @@
 All notable changes to `@cboxdk/id-js` are recorded here. Earlier releases are described
 in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
-## Unreleased
+## [0.17.0] - 2026-09-24
 
 Organization selection and support sessions. Needs a Cbox ID instance that understands the
 `organization` / `organization_hint` authorize parameters and emits `org_role` and `act`
