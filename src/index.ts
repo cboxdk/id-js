@@ -25,19 +25,40 @@ export {
   AuthenticationError,
 } from './errors.js';
 export { createVerifier, challenge, randomToken } from './pkce.js';
+export {
+  organization,
+  actor,
+  isSupportSession,
+  sessionId,
+  roles,
+  permissions,
+  hasRole,
+  hasPermission,
+} from './claims.js';
+export type {
+  OrganizationRole,
+  CboxActiveOrganization,
+  CboxActor,
+  ClaimSource,
+} from './claims.js';
 export { defineAuthz, buildManifest, publishManifest } from './authz.js';
 export type {
   PermissionDefinition,
   RoleDefinition,
   AuthzDeclaration,
   AuthzManifest,
+  ManifestPermission,
+  ManifestRole,
   ManifestPublisherConfig,
   ManifestSyncSummary,
 } from './authz.js';
 export type {
   CboxIdConfig,
   CboxUser,
+  CboxOrganization,
+  AuthorizationPrompt,
   AuthorizationRequest,
+  AuthorizationRequestOptions,
   TokenResponse,
   RefreshedTokens,
   DiscoveryDocument,

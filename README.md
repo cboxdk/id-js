@@ -90,6 +90,129 @@ const user = await client.authenticate({
 });
 ```
 
+## Organizations
+
+A sign-in can be bound to one organization. The tokens then carry `org`, `org_name`, the
+person's membership tier in it (`org_role`), and the app `roles` / `permissions` they hold
+**there** — so switching organization means a new authorization, not a flag on the old
+session.
+
+```ts
+// Bind to an organization you already know (the person must be an active member):
+await client.createAuthorizationRequest({ organization: 'org_2x…' });
+
+// Always show the hosted organization picker, with your guess preselected:
+await client.createAuthorizationRequest({
+  prompt: 'select_organization',
+  organizationHint: 'org_2x…',
+});
+
+// Hosted "create a team" step; the person becomes its owner and the sign-in
+// continues bound to the new organization:
+await client.createAuthorizationRequest({ prompt: 'create_organization' });
+```
+
+| Option | Sent as | Meaning |
+|---|---|---|
+| `organization` | `organization` | Bind the sign-in to this organization. |
+| `organizationHint` | `organization_hint` | Preselect it in the picker; the person may choose another. |
+| `prompt: 'select_organization'` | `prompt=select_organization` | Always show the picker. |
+| `prompt: 'create_organization'` | `prompt=create_organization` | Create an organization first. |
+
+`organization` cannot be combined with either organization prompt — it has already made
+the choice they ask the person to make — and the SDK refuses the combination rather than
+sending it. Use `organizationHint` with the picker instead.
+
+### Switching
+
+`switchOrganization(id)` is `createAuthorizationRequest({ organization: id })` under a name
+that says what it is for. Persist and redirect exactly as for a sign-in; Cbox ID already
+has the person's session, so they normally come straight back without seeing a form.
+
+```ts
+// app/auth/switch-organization/route.ts (Next.js)
+import { NextResponse, type NextRequest } from 'next/server';
+import { cboxId } from '@/lib/cbox';
+
+export async function GET(request: NextRequest) {
+  const org = request.nextUrl.searchParams.get('org');
+  if (!org) return NextResponse.redirect(new URL('/', request.url));
+  return cboxId.switchOrganization(org);
+}
+```
+
+**The binding is checked, not trusted.** The request echoes `organization`; persist it with
+`state`, `codeVerifier` and `nonce` and pass it back as `stored.organization`, and
+`authenticate()` refuses tokens for any other organization. (The Next.js adapter does this
+in a cookie for you.) An instance that predates organization selection ignores the
+parameter and answers for whichever organization the session already had — without the
+check, your app would show the new organization's name over the old one's data.
+
+Replace your session with the user the callback returns rather than patching the old one:
+`org_role`, `roles` and `permissions` can all differ between organizations. A person who
+is not (or no longer) an active member comes back with `error=access_denied`:
+
+```ts
+import { AuthenticationError } from '@cboxdk/id-js';
+
+try {
+  user = await cboxId.callback(request);
+} catch (e) {
+  if (e instanceof AuthenticationError && e.error === 'access_denied') {
+    // Not a member of that organization — send them back to the one they were in.
+  }
+}
+```
+
+### Listing a person's organizations
+
+Request the `organizations` scope and `user.organizations` lists every organization the
+person is an active member of — `{ id, name, role }` — for an organization switcher. It is
+a separate scope because it discloses memberships across unrelated customers; a plain
+`profile` sign-in does not get it.
+
+### Reading the claims
+
+The signed-in user carries them typed:
+
+```ts
+user.organization; // { id, name, role } | null — role is 'owner' | 'admin' | 'developer' | 'member' | 'viewer' | null
+user.roles;        // string[]
+user.permissions;  // string[]
+user.actor;        // { sub, actor } | null — see support sessions below
+user.sessionId;    // the id_token's `sid` | null — keep it to match a back-channel logout
+```
+
+The same helpers work on the user and on a claim set you verified yourself, such as an
+access token's payload on a resource server:
+
+```ts
+import { organization, hasPermission, hasRole, isSupportSession } from '@cboxdk/id-js';
+
+if (!hasPermission(payload, 'invoices:create')) return forbidden();
+if (organization(user)?.role === 'owner') showBilling();
+```
+
+Matching is exact — `invoices:*` does not grant `invoices:delete`. An `org_role` this SDK
+version does not recognise reads as `null`, never as a tier it would have to guess.
+
+### Support sessions
+
+A staff member can act as one of your users for a limited time (at most an hour, no refresh
+token, with a recorded reason). Those tokens carry the RFC 8693 `act` claim naming the
+staff member, and `isSupportSession()` reports it:
+
+```ts
+if (isSupportSession(user)) {
+  // Show a banner, and refuse what a helper should never do on someone's behalf:
+  // changing their password, their email, their payout details.
+}
+```
+
+It is **fail-closed**: any `act` claim counts, including one whose shape the SDK cannot
+read (`user.actor.sub` is then `null`). A claim it cannot parse is not evidence that nobody
+else is at the keyboard.
+
 ## From a CLI (device flow)
 
 A command-line tool has no browser to redirect, and neither does a CI job, a container or
@@ -277,6 +400,47 @@ everywhere" needs. `machineToken`, `introspect` and `revoke` authenticate as the
 client, so they require a `clientSecret`; `userinfo` authenticates with the user's
 own access token and does not.
 
+## API keys for your API
+
+Your customers can create API keys for **your** API on Cbox ID's hosted page, and your API
+asks Cbox ID whether a key it was handed is good. Link people to the page:
+
+```ts
+client.apiKeysUrl({ returnTo: 'https://app.acme.com/settings' });
+// → {issuer}/account/api-keys?client_id=<your client>&return_to=…
+// options: clientId (another of your apps), returnTo, organization (which of theirs)
+```
+
+Verify a key on your server — never in a browser, since it uses your client secret. It
+lives in its own entry, `@cboxdk/id-js/server`, so a browser bundle never pulls it in:
+
+```ts
+import { ApiKeyVerifier } from '@cboxdk/id-js/server';
+import { hasPermission } from '@cboxdk/id-js';
+
+const keys = new ApiKeyVerifier({ issuer, clientId, clientSecret, cacheTtlMs: 10_000 });
+
+const answer = await keys.verifyApiKey(request.headers.get('x-api-key') ?? '');
+if (!answer.active) return new Response(null, { status: 401 });
+if (!hasPermission(answer, 'invoices:create')) return new Response(null, { status: 403 });
+// answer: { active, key_id, sub, org, org_role, permissions, client_id, expires_at }
+```
+
+On Next.js the adapter does the same with its own configuration:
+`await cboxId.verifyApiKey(key)` and `cboxId.apiKeysUrl()`.
+
+- Every bad key — unknown, revoked, expired, another app's, a holder who left the
+  organization — is `{ active: false }`, with no reason. That is Cbox ID's design, so the
+  endpoint cannot be used to probe keys.
+- `permissions` is already re-capped to what the holder holds for your app **now**; a
+  demotion takes effect on the next verification.
+- An answer naming another app's `client_id` is refused with an `AuthenticationError`, as
+  is a failed call (wrong client credentials, instance unreachable). Treat a throw as "do
+  not let this request in".
+- `cacheTtlMs` (off by default, at most 60 seconds) caches **active** answers per key, never
+  past the key's `expires_at`. While an answer is cached, a revoked key keeps working —
+  keep it short. Refusals are never cached.
+
 ## Migrating off an old login
 
 Bulk-importing users with their existing hashes is the first answer, and the better one.
@@ -372,8 +536,8 @@ claims for you to enforce. Requires the app's client to hold the `apps.manifest`
 ```ts
 import { defineAuthz, publishManifest } from '@cboxdk/id-js';
 
-// Declare the catalog (validated: keys are `feature:action`, roles must reference
-// declared permissions). Keep this next to the code that enforces it.
+// Declare the catalog (validated: keys are lowercase `feature:action` slugs, and roles
+// must reference declared permissions). Keep this next to the code that enforces it.
 export const authz = defineAuthz({
   permissions: [
     { key: 'invoices:create', description: 'Create invoices' },
@@ -397,6 +561,39 @@ const summary = await publishManifest(
 );
 // → { unchanged, roles_declared, permissions_declared, ... }
 ```
+
+### Staff roles and self-serve permissions
+
+Two flags decide who may hand something out:
+
+- **`tenantAssignable: false` on a role** makes it a **staff role** — for your own support
+  or operations people, held environment-wide across every customer. Cbox ID never lists
+  or accepts it on an organization's own admin pages; only an environment administrator
+  can grant it. Roles default to `true`.
+- **`tenantAssignable: true` on a permission** lets an organization's administrators put it
+  in custom roles they build themselves. Permissions default to `false`: internal unless
+  you opt in.
+
+```ts
+export const authz = defineAuthz({
+  permissions: [
+    { key: 'parcels:read', description: 'View parcels', tenantAssignable: true },
+    // Lets a staff member start a support session in this app (see "Support sessions").
+    { key: 'support:impersonate', description: 'Act as a customer' },
+  ],
+  roles: [
+    { key: 'viewer', name: 'Viewer', permissions: ['parcels:read'] },
+    { key: 'support', name: 'Support', description: 'Our support team',
+      permissions: ['support:impersonate', 'parcels:read'], tenantAssignable: false },
+  ],
+});
+```
+
+On the wire the flags are `tenant_assignable`, and only their non-default state is sent
+(`false` on a role, `true` on a permission). Both are part of the manifest's `version`, so
+marking a role staff-only in a new deploy re-syncs it rather than being skipped as
+unchanged. A value that is not a real boolean — the string `"false"` from a YAML file, say
+— is refused, because it would otherwise read as the opposite of what it says.
 
 `publishManifest` mints a client-credentials token (`scope=apps.manifest`) and POSTs
 the manifest to `{issuer}/api/v1/apps/manifest`. It is a server-side operation — keep

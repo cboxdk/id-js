@@ -3,8 +3,11 @@ import { Discovery } from './discovery.js';
 import { assertSecureIssuer } from './issuer.js';
 import { AuthenticationError, ConfigurationError, InvalidStateError, oauthError } from './errors.js';
 import { challenge, createVerifier, randomToken } from './pkce.js';
+import { actor, organization, permissions, roles, sessionId } from './claims.js';
 import type {
+  AuthorizationPrompt,
   AuthorizationRequest,
+  AuthorizationRequestOptions,
   CboxIdConfig,
   DeviceAuthorization,
   CboxOrganization,
@@ -33,6 +36,16 @@ export interface StoredAuthState {
   nonce: string;
   /** The `maxAge` this login demanded, if any. See {@link AuthorizationRequest.maxAge}. */
   maxAge?: number;
+  /**
+   * The organization this sign-in was bound to, if any. See
+   * {@link AuthorizationRequest.organization}.
+   *
+   * Checked, not trusted: a binding nobody verifies is a binding in name only. An
+   * instance that predates the `organization` parameter ignores it and returns tokens for
+   * whichever organization the session already had — and an app that switched to "Globex"
+   * would then show Globex's name over Acme's data.
+   */
+  organization?: string;
   /**
    * The scopes THIS authorization asked for, when you overrode the configured set.
    *
@@ -85,14 +98,10 @@ export class CboxIdClient {
    * `nonce` — persist those (signed, httpOnly cookies are ideal) and hand them back
    * to {@link authenticate} on the callback.
    */
-  async createAuthorizationRequest(options: {
-    scopes?: string[];
-    redirectUri?: string;
-    state?: string;
-    prompt?: string;
-    loginHint?: string;
-    maxAge?: number;
-  } = {}): Promise<AuthorizationRequest> {
+  async createAuthorizationRequest(options: AuthorizationRequestOptions = {}): Promise<AuthorizationRequest> {
+    const prompt = promptValue(options.prompt);
+    assertOrganizationOptions(options, prompt);
+
     const codeVerifier = createVerifier();
     const state = options.state ?? randomToken(16);
     const nonce = randomToken(16);
@@ -119,14 +128,20 @@ export class CboxIdClient {
       code_challenge: await challenge(codeVerifier),
       code_challenge_method: 'S256',
     });
-    if (options.prompt) {
-      params.set('prompt', options.prompt);
+    if (prompt.length > 0) {
+      params.set('prompt', prompt.join(' '));
     }
     if (options.loginHint) {
       params.set('login_hint', options.loginHint);
     }
     if (typeof options.maxAge === 'number') {
       params.set('max_age', String(options.maxAge));
+    }
+    if (options.organization !== undefined) {
+      params.set('organization', options.organization);
+    }
+    if (options.organizationHint !== undefined) {
+      params.set('organization_hint', options.organizationHint);
     }
 
     const endpoint = await this.discovery.endpoint('authorization_endpoint');
@@ -138,7 +153,29 @@ export class CboxIdClient {
       // Carried through so authenticate() can hold the instance to it. Only present
       // when requested (exactOptionalPropertyTypes).
       ...(typeof options.maxAge === 'number' ? { maxAge: options.maxAge } : {}),
+      ...(options.organization !== undefined ? { organization: options.organization } : {}),
     };
+  }
+
+  /**
+   * Switch the signed-in person to another organization: a new authorization bound to
+   * `organizationId`. Persist and redirect exactly as for
+   * {@link createAuthorizationRequest} — it is one, with `organization` set.
+   *
+   * Cbox ID already holds the person's session, so this is normally a redirect there and
+   * straight back with no sign-in form. The tokens that come back carry the new `org`,
+   * `org_role`, `roles` and `permissions`; replace your session with them rather than
+   * patching the old one, because every one of those can differ between organizations.
+   *
+   * A person who is not (or is no longer) an active member of that organization comes
+   * back with `error=access_denied`, which {@link authenticate} throws as an
+   * `AuthenticationError` with `error === 'access_denied'`.
+   */
+  switchOrganization(
+    organizationId: string,
+    options: Omit<AuthorizationRequestOptions, 'organization' | 'organizationHint'> = {},
+  ): Promise<AuthorizationRequest> {
+    return this.createAuthorizationRequest({ ...options, organization: organizationId });
   }
 
   /**
@@ -160,8 +197,13 @@ export class CboxIdClient {
     }
 
     if (params.error) {
+      // The code travels as `error`, not only in the message: `access_denied` after a
+      // switchOrganization() means "not a member of that organization", which an app
+      // answers by switching back — not by signing the person out.
       throw new AuthenticationError(
         `Cbox ID returned an error: ${params.error}${params.error_description ? ` (${params.error_description})` : ''}`,
+        params.error,
+        params.error_description ?? undefined,
       );
     }
 
@@ -198,7 +240,15 @@ export class CboxIdClient {
       );
     }
 
-    return await this.identityFrom(tokens, verified);
+    const user = await this.identityFrom(tokens, verified);
+
+    if (stored.organization !== undefined && user.organizationId !== stored.organization) {
+      throw new AuthenticationError(
+        `The sign-in was bound to organization ${stored.organization}, but the tokens are for ${user.organizationId ?? 'no organization'}. The instance may not support organization selection.`,
+      );
+    }
+
+    return user;
   }
 
   /**
@@ -245,6 +295,11 @@ export class CboxIdClient {
       email: typeof claims['email'] === 'string' ? claims['email'] : null,
       name: typeof claims['name'] === 'string' ? claims['name'] : null,
       organizationId: typeof claims['org'] === 'string' ? claims['org'] : null,
+      organization: organization(claims),
+      roles: roles(claims),
+      permissions: permissions(claims),
+      actor: actor(claims),
+      sessionId: sessionId(claims),
       // Only present when the instance emitted the claim (exactOptionalPropertyTypes).
       ...(organizations ? { organizations } : {}),
       claims,
@@ -462,6 +517,27 @@ export class CboxIdClient {
   profileUrl(returnTo?: string): string {
     const base = `${this.config.issuer.replace(/\/$/, '')}${this.accountPath()}`;
     return returnTo ? `${base}?${new URLSearchParams({ return_to: returnTo }).toString()}` : base;
+  }
+
+  /**
+   * The hosted page where a person creates and revokes API keys for your API — Cbox ID's
+   * `/account/api-keys`, preselected to this app (or `clientId`). Keys made there are
+   * checked with `ApiKeyVerifier` from `@cboxdk/id-js/server`.
+   *
+   * `returnTo` becomes a link back to your app, honoured only for an origin the app
+   * registered. `organization` picks which of the person's organizations the keys act in;
+   * omitted, the page uses the one they are in.
+   */
+  apiKeysUrl(options: { clientId?: string; returnTo?: string; organization?: string } = {}): string {
+    const params = new URLSearchParams({ client_id: options.clientId ?? this.config.clientId });
+    if (options.returnTo) {
+      params.set('return_to', options.returnTo);
+    }
+    if (options.organization) {
+      params.set('organization', options.organization);
+    }
+
+    return `${this.config.issuer.replace(/\/$/, '')}/account/api-keys?${params.toString()}`;
   }
 
   /**
@@ -736,6 +812,56 @@ export class CboxIdClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+/** Normalise `prompt` to a de-duplicated list, refusing what the server would refuse. */
+function promptValue(prompt: AuthorizationRequestOptions['prompt']): AuthorizationPrompt[] {
+  if (prompt === undefined) {
+    return [];
+  }
+
+  const values = [...new Set(typeof prompt === 'string' ? [prompt] : prompt)];
+
+  // OIDC Core §3.1.2.1: `none` with any other value is an error. Failing here names the
+  // call that built it; failing at the server names nothing the caller can find.
+  if (values.includes('none') && values.length > 1) {
+    throw new ConfigurationError("`prompt: 'none'` cannot be combined with another prompt value.");
+  }
+
+  return values;
+}
+
+/**
+ * Refuse organization options that contradict each other. Each of these would reach the
+ * server as a request with two incompatible meanings and come back as a generic error
+ * after a full redirect — far from the line that built it.
+ */
+function assertOrganizationOptions(options: AuthorizationRequestOptions, prompt: AuthorizationPrompt[]): void {
+  // An empty id is not "no organization" at the server — it is a parameter that is
+  // present and names nothing. Omit the option instead.
+  if (options.organization === '') {
+    throw new ConfigurationError('`organization` is empty. Omit it to sign in without binding to an organization.');
+  }
+  if (options.organizationHint === '') {
+    throw new ConfigurationError('`organizationHint` is empty. Omit it when you have no organization to suggest.');
+  }
+
+  if (options.organization === undefined) {
+    return;
+  }
+
+  // `organization` binds to an existing organization; both prompts below ask the person
+  // to choose or create one. Sending both leaves the server to guess which you meant.
+  if (prompt.includes('select_organization')) {
+    throw new ConfigurationError(
+      "`organization` binds the sign-in to one organization, so `prompt: 'select_organization'` has nothing to choose. Use `organizationHint` to preselect an organization in the picker instead.",
+    );
+  }
+  if (prompt.includes('create_organization')) {
+    throw new ConfigurationError(
+      "`organization` binds the sign-in to an existing organization and `prompt: 'create_organization'` creates a new one. Send one or the other.",
+    );
   }
 }
 
