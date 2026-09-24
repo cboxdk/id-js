@@ -26,6 +26,16 @@ at the callback instead of silently landing in the old organization (see below).
 - Claim helpers that work on a `CboxUser` or on a claim set you verified yourself:
   `organization()`, `actor()`, `isSupportSession()`, `roles()`, `permissions()`,
   `hasRole()`, `hasPermission()`.
+- `client.apiKeysUrl({ clientId?, returnTo?, organization? })` (and `cboxId.apiKeysUrl()`
+  on the Next.js adapter): the hosted page where a person creates and revokes API keys for
+  your API, `/account/api-keys`, preselected to this app.
+- `ApiKeyVerifier` in a new server-only entry, `@cboxdk/id-js/server`, and
+  `cboxId.verifyApiKey(key)` on the Next.js adapter: verifies a customer API key with
+  `POST /oauth/api-keys/verify` (HTTP Basic client auth) and returns the typed answer
+  `{ active, key_id, sub, org, org_role, permissions, client_id, expires_at }`. It refuses
+  an answer for any other `client_id`, treats a key past `expires_at` as inactive, refuses
+  to run in a browser, and has an optional cache of active answers (`cacheTtlMs`, at most
+  60 s, never past the key's expiry). Not exported from the main entry.
 - `CboxUser.sessionId` and `sessionId()`: the ID Token's `sid`, the sign-in session a
   back-channel logout token names.
 - Staff roles: `tenantAssignable: false` on a `RoleDefinition` publishes the role as
@@ -38,6 +48,14 @@ at the callback instead of silently landing in the old organization (see below).
 - Exported types `AuthorizationPrompt`, `AuthorizationRequestOptions`,
   `OrganizationRole`, `CboxActiveOrganization`, `CboxActor`, `ClaimSource`,
   `CboxOrganization`, and `SignInOptions` from `@cboxdk/id-js/nextjs`.
+
+### Fixed
+
+- `CboxIdConfig.accountPath` was documented as defaulting to `/settings`, which on Cbox ID
+  is the organization's settings page for its administrators. `profileUrl()` has actually
+  defaulted to the person's own account area, `/account`, since 0.8.0; the documentation
+  now says so. If you set `accountPath: '/settings'` because of it, remove it: members who
+  are not organization admins are redirected away from that page and lose `return_to`.
 
 ### Changed
 

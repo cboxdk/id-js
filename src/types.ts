@@ -31,7 +31,8 @@ export interface CboxIdConfig {
   scopes?: string[];
   /**
    * Path of the instance's hosted account page that {@link CboxIdClient.profileUrl}
-   * points at. Defaults to `/settings`.
+   * points at. Defaults to `/account`, the person's own account area. (`/settings` is
+   * the organization's settings page, for its administrators.)
    */
   accountPath?: string;
   /** Timeout (ms) for back-channel HTTP calls. Defaults to `10000`. */

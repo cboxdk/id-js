@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { ApiKeyVerifier, type ApiKeyVerification } from './api-keys.js';
 import { CboxIdClient } from './client.js';
 import { ConfigurationError } from './errors.js';
 import type { AuthorizationRequest, AuthorizationRequestOptions, CboxIdConfig, CboxUser } from './types.js';
@@ -58,6 +59,14 @@ export interface CboxIdNext {
   profileUrl(returnTo?: string): string;
   /** A redirect response to the hosted profile page. */
   profileRedirect(returnTo?: string): NextResponse;
+  /** The hosted API-keys page for this app. See {@link CboxIdClient.apiKeysUrl}. */
+  apiKeysUrl(options?: { clientId?: string; returnTo?: string; organization?: string }): string;
+  /**
+   * Verify a customer API key presented to your API. Needs `clientSecret`
+   * (`CBOX_ID_CLIENT_SECRET`); see `ApiKeyVerifier` in `@cboxdk/id-js/server`, which
+   * this uses with the adapter's configuration and no cache.
+   */
+  verifyApiKey(key: string): Promise<ApiKeyVerification>;
   /**
    * RP-initiated logout URL, or null when the instance advertises none. Pass the
    * user's `id_token` as `idTokenHint` when you kept it; `client_id` is sent for
@@ -80,6 +89,7 @@ export type SignInOptions = Omit<AuthorizationRequestOptions, 'redirectUri' | 's
 export function createCboxId(config?: Partial<CboxIdConfig>): CboxIdNext {
   const resolved = resolveConfig(config);
   const client = new CboxIdClient(resolved);
+  let apiKeys: ApiKeyVerifier | undefined;
 
   const tempCookieOptions = {
     httpOnly: true,
@@ -148,6 +158,22 @@ export function createCboxId(config?: Partial<CboxIdConfig>): CboxIdNext {
 
     profileRedirect(returnTo) {
       return NextResponse.redirect(client.profileUrl(returnTo));
+    },
+
+    apiKeysUrl(options) {
+      return client.apiKeysUrl(options);
+    },
+
+    verifyApiKey(key) {
+      // Built on first use, so an app that never verifies a key does not need a secret.
+      apiKeys ??= new ApiKeyVerifier({
+        issuer: resolved.issuer,
+        clientId: resolved.clientId,
+        clientSecret: resolved.clientSecret ?? '',
+        ...(resolved.timeoutMs ? { timeoutMs: resolved.timeoutMs } : {}),
+      });
+
+      return apiKeys.verifyApiKey(key);
     },
 
     signOutUrl(returnTo, idTokenHint) {

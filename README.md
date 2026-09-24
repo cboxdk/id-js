@@ -400,6 +400,47 @@ everywhere" needs. `machineToken`, `introspect` and `revoke` authenticate as the
 client, so they require a `clientSecret`; `userinfo` authenticates with the user's
 own access token and does not.
 
+## API keys for your API
+
+Your customers can create API keys for **your** API on Cbox ID's hosted page, and your API
+asks Cbox ID whether a key it was handed is good. Link people to the page:
+
+```ts
+client.apiKeysUrl({ returnTo: 'https://app.acme.com/settings' });
+// → {issuer}/account/api-keys?client_id=<your client>&return_to=…
+// options: clientId (another of your apps), returnTo, organization (which of theirs)
+```
+
+Verify a key on your server — never in a browser, since it uses your client secret. It
+lives in its own entry, `@cboxdk/id-js/server`, so a browser bundle never pulls it in:
+
+```ts
+import { ApiKeyVerifier } from '@cboxdk/id-js/server';
+import { hasPermission } from '@cboxdk/id-js';
+
+const keys = new ApiKeyVerifier({ issuer, clientId, clientSecret, cacheTtlMs: 10_000 });
+
+const answer = await keys.verifyApiKey(request.headers.get('x-api-key') ?? '');
+if (!answer.active) return new Response(null, { status: 401 });
+if (!hasPermission(answer, 'invoices:create')) return new Response(null, { status: 403 });
+// answer: { active, key_id, sub, org, org_role, permissions, client_id, expires_at }
+```
+
+On Next.js the adapter does the same with its own configuration:
+`await cboxId.verifyApiKey(key)` and `cboxId.apiKeysUrl()`.
+
+- Every bad key — unknown, revoked, expired, another app's, a holder who left the
+  organization — is `{ active: false }`, with no reason. That is Cbox ID's design, so the
+  endpoint cannot be used to probe keys.
+- `permissions` is already re-capped to what the holder holds for your app **now**; a
+  demotion takes effect on the next verification.
+- An answer naming another app's `client_id` is refused with an `AuthenticationError`, as
+  is a failed call (wrong client credentials, instance unreachable). Treat a throw as "do
+  not let this request in".
+- `cacheTtlMs` (off by default, at most 60 seconds) caches **active** answers per key, never
+  past the key's `expires_at`. While an answer is cached, a revoked key keeps working —
+  keep it short. Refusals are never cached.
+
 ## Migrating off an old login
 
 Bulk-importing users with their existing hashes is the first answer, and the better one.

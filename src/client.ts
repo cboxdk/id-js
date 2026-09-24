@@ -520,6 +520,27 @@ export class CboxIdClient {
   }
 
   /**
+   * The hosted page where a person creates and revokes API keys for your API — Cbox ID's
+   * `/account/api-keys`, preselected to this app (or `clientId`). Keys made there are
+   * checked with `ApiKeyVerifier` from `@cboxdk/id-js/server`.
+   *
+   * `returnTo` becomes a link back to your app, honoured only for an origin the app
+   * registered. `organization` picks which of the person's organizations the keys act in;
+   * omitted, the page uses the one they are in.
+   */
+  apiKeysUrl(options: { clientId?: string; returnTo?: string; organization?: string } = {}): string {
+    const params = new URLSearchParams({ client_id: options.clientId ?? this.config.clientId });
+    if (options.returnTo) {
+      params.set('return_to', options.returnTo);
+    }
+    if (options.organization) {
+      params.set('organization', options.organization);
+    }
+
+    return `${this.config.issuer.replace(/\/$/, '')}/account/api-keys?${params.toString()}`;
+  }
+
+  /**
    * The RP-initiated logout URL, or null when the instance advertises none.
    *
    * `client_id` is always sent, even without a `returnTo`: the OP validates
