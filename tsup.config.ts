@@ -5,6 +5,7 @@ export default defineConfig({
     index: 'src/index.ts',
     nextjs: 'src/nextjs.ts',
     server: 'src/server.ts',
+    management: 'src/management/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
