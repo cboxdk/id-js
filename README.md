@@ -600,6 +600,147 @@ the manifest to `{issuer}/api/v1/apps/manifest`. It is a server-side operation �
 your `clientSecret` off the browser. The wire format matches the PHP SDK
 (`cboxdk/laravel-id-client`), so any SDK can publish the same catalog.
 
+## Management API
+
+`@cboxdk/id-js/management` is a typed client for Cbox ID's management planes. It is
+generated from the OpenAPI documents the server publishes, so every method, path, scope and
+type matches the server you generated it from. Use it from server code only: every client
+holds a management credential.
+
+| Client | Plane | Credential | `baseUrl` |
+| --- | --- | --- | --- |
+| `EnvironmentClient` | One environment's tenancy: organizations, users, apps, roles, SSO… | `cbid_env_…` key, or a delegated access token | The environment's own host |
+| `WorkspaceClient` | The workspace above its environments: projects, environments, team, keys | `cbid_ws_…` key | `https://api.cboxid.com` (default) |
+| `PlatformClient` | The deployment itself, for operators | Delegated operator token only | `https://api.cboxid.com` (default) |
+| `AccountClient` | A person's own account | Delegated token only | The environment's own host |
+
+Method names are the server's action names: `apps.secrets.rotate` is
+`env.apps.secrets.rotate(...)`, and `sso.connections.require_sso` is
+`env.sso.connections.requireSso(...)`. Path parameters come first, in path order, then the body
+(or the query, for a read), then per-call options. Every call resolves to
+`{ data, meta, body, status, replayed, idempotencyKey, requestId, headers }`.
+
+### Create an app and rotate its secret
+
+```ts
+import { EnvironmentClient, CboxIdApiError, ApprovalDeniedError } from '@cboxdk/id-js/management';
+
+const env = new EnvironmentClient({
+  baseUrl: 'https://acme.cboxid.com',
+  apiKey: process.env.CBOX_ID_ENV_KEY!, // cbid_env_…
+  onApprovalRequired: (approval, { action }) => {
+    console.log(`Approve ${action} on your device. Code: ${approval.binding_code}`);
+  },
+});
+
+const { data: app } = await env.apps.create({
+  name: 'Billing',
+  type: 'web',
+  redirect_uris: ['https://billing.acme.com/callback'],
+});
+// app.client_secret is in this response and in no other. Store it now.
+
+try {
+  const { data: secret } = await env.apps.secrets.rotate(app.id, { grace_seconds: 3600 });
+  // secret.client_secret: the new secret, shown once.
+} catch (e) {
+  if (e instanceof ApprovalDeniedError) console.log('Rotation was declined.');
+  else if (e instanceof CboxIdApiError && e.isValidationError) console.log(e.errors);
+  else throw e;
+}
+```
+
+When a key's policy holds an action for a person's approval, the server answers
+`202 approval_required`. By default the client calls `onApprovalRequired` (show the
+`binding_code` so the person can match it on their device), polls the approval, and repeats the
+request with `Cbox-Approval: <id>` and the same `Idempotency-Key` once it is approved.
+`ApprovalDeniedError` and `ApprovalExpiredError` are thrown when it is denied or expires. If you
+do not want to wait in the same call, pass `{ approval: 'return' }`:
+
+```ts
+const outcome = await env.apps.secrets.rotate(app.id, { grace_seconds: 0 }, { approval: 'return' });
+if (outcome.pending) {
+  console.log(`Code: ${outcome.approval.binding_code}`);
+  const { data } = await outcome.resume(); // polls, then repeats the request
+}
+```
+
+### Bootstrap an environment from a workspace key
+
+```ts
+import { WorkspaceClient, EnvironmentClient } from '@cboxdk/id-js/management';
+
+const workspace = new WorkspaceClient({ apiKey: process.env.CBOX_ID_WS_KEY! }); // cbid_ws_…
+
+const { data: created } = await workspace.environments.create({
+  name: 'Staging',
+  type: 'sandbox',
+  initial_key: { name: 'bootstrap', scopes: ['apps:write', 'organizations:write'] },
+});
+
+// The first management key, returned once. On an idempotent replay it is null.
+const env = new EnvironmentClient({ baseUrl: created!.issuer!, apiKey: created!.initial_key!.token! });
+await env.organizations.create({ name: 'Acme', slug: 'acme' });
+```
+
+### Idempotency, retries and errors
+
+- Every `POST`, `PUT`, `PATCH` and `DELETE` sends an `Idempotency-Key`, a fresh UUID unless you
+  pass `{ idempotencyKey }`. Network failures, `5xx`, `429` and `409 idempotency_in_progress` are
+  retried with the **same** key (`retry: { maxRetries, baseDelayMs, maxDelayMs }`; default 3
+  retries). `Retry-After` is respected; one longer than `maxDelayMs` is thrown instead of waited
+  out. `replayed` is `true` when the server returned the first request's stored answer
+  (`Idempotent-Replayed`). A secret in a replayed answer is `null`.
+- A failed call throws `CboxIdApiError` with `status`, `error` (the stable code), `message`,
+  `errors` (field-keyed, on `validation_failed`), `requestId` and `retryAfter`. A call that never
+  got an answer throws `ManagementNetworkError`, which carries the `idempotencyKey` so you can
+  repeat the request safely.
+- The client never logs. Secrets in responses are returned as they arrive, and request bodies
+  are never put in an error.
+
+### Lists
+
+Every paged list also has an `…All` variant that iterates every item, fetching pages as you
+reach them. It follows `meta.next_cursor` on the environment plane and `meta.next_page` on the
+workspace plane:
+
+```ts
+for await (const org of env.organizations.listAll({ status: 'active' })) {
+  console.log(org.id, org.name);
+}
+```
+
+### Delegated tokens and DPoP
+
+Pass `accessToken` (a string, or a function that is called before every request so it can
+refresh) instead of `apiKey`. For a DPoP-bound token, pass a signer built from the key pair the
+token was bound to:
+
+```ts
+import { AccountClient, createDPoPSigner } from '@cboxdk/id-js/management';
+
+const me = new AccountClient({
+  baseUrl: 'https://acme.cboxid.com',
+  accessToken: () => tokens.current(),
+  dpop: await createDPoPSigner(keyPair), // ES256, WebCrypto
+});
+await me.sessions.revokeOthers();
+```
+
+### Types, metadata and regenerating
+
+Schema and operation types are exported per plane as namespaces (`EnvironmentApi.App`,
+`WorkspaceApi.EnvironmentsCreateBody`). The operation tables (`environmentOperations`, …) list
+each action's method, path, scope, danger and whether it can be held for approval, which is
+useful for showing a confirmation before a `critical` action. `env.request(method, path, input)`
+calls a route that is not generated.
+
+The specs are vendored in `openapi/`. `npm run generate` (Node 22.6 or later) regenerates
+`src/management/generated/` from them, and
+`npm run generate -- --fetch environment=https://acme.cboxid.com` (or `workspace=`, `platform=`,
+`account=`, `all=`) refreshes a vendored spec from a running server first. The test suite fails
+when the generated code and the vendored specs disagree.
+
 ## Security & scope
 
 Login is hardened by default — PKCE, `state`, nonce, and full `id_token` verification
@@ -607,8 +748,9 @@ Login is hardened by default — PKCE, `state`, nonce, and full `id_token` verif
 freshness window. Keep `clientSecret` and webhook secrets server-side.
 
 This is a **client**. It authenticates users and calls a Cbox ID instance's standard
-endpoints; it does not configure SSO, run SCIM, or manage organizations — those are
-platform capabilities of [`cboxdk/laravel-id`](https://github.com/cboxdk/laravel-id).
+endpoints. The management planes (organizations, apps, SSO, keys…) are reached through
+[`@cboxdk/id-js/management`](#management-api), which only calls the instance's published API;
+the capabilities themselves live in [`cboxdk/laravel-id`](https://github.com/cboxdk/laravel-id).
 
 Report vulnerabilities via this repo's GitHub **Private Vulnerability Reporting**.
 

@@ -3,6 +3,34 @@
 All notable changes to `@cboxdk/id-js` are recorded here. Earlier releases are described
 in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
+## [Unreleased]
+
+### Added
+
+- `@cboxdk/id-js/management`: typed clients for Cbox ID's management planes, generated from
+  the OpenAPI documents the server publishes. `EnvironmentClient` (an environment's own host,
+  `cbid_env_…` key or delegated token), `WorkspaceClient` (`cbid_ws_…` key), `PlatformClient`
+  (operator token) and `AccountClient` (a person's own token). Methods are named after the
+  server's actions (`env.apps.secrets.rotate(id, body)`, `workspace.environments.create(body)`),
+  with typed bodies, queries and responses.
+- Every write sends an `Idempotency-Key` (a fresh UUID unless you pass one) and is retried
+  with the same key on network failures, `5xx`, `429` and `409 idempotency_in_progress`,
+  respecting `Retry-After`. `replayed` reports `Idempotent-Replayed`.
+- Approvals: a `202 approval_required` calls `onApprovalRequired` (show the binding code),
+  polls the approval and repeats the request with `Cbox-Approval` and the same key.
+  `ApprovalDeniedError` and `ApprovalExpiredError` when it is not approved;
+  `{ approval: 'return' }` hands back the pending approval with a `resume()`.
+- `CboxIdApiError` (`status`, `error`, `message`, `errors`, `requestId`, `retryAfter`) and
+  `ManagementNetworkError` (with the `idempotencyKey` to repeat safely).
+- `…All` async iterators on every paged list (cursor and page-number paging).
+- DPoP-bound access tokens: `createDPoPSigner()` and `generateDPoPKeyPair()` (ES256 on
+  WebCrypto, with `DPoP-Nonce` challenge handling).
+- Operation tables (`environmentOperations`, …) with each action's method, path, scope, danger
+  and whether it can be held for approval.
+- `npm run generate` regenerates the clients from the vendored specs in `openapi/`, and
+  `--fetch <plane>=<host>` refreshes a spec from a running server first. The test suite fails
+  when the two disagree.
+
 ## [0.17.0] - 2026-09-24
 
 Organization selection and support sessions. Needs a Cbox ID instance that understands the
