@@ -6,6 +6,57 @@ import type { CallOptions, OperationSpec, Outcome } from '../types.js';
 
 // ── Schemas (components.schemas) ────────────────────────────────────────────────────────────
 
+/** A management key of this environment. `token` is present once, on the answer that minted it, and never again. */
+export interface ManagementKey {
+  id: string;
+  name: string;
+  description?: string | null;
+  /** The key's first characters, to recognise it by. */
+  prefix: string;
+  scopes: string[];
+  active: boolean;
+  /** The key that minted this one, if a key did. */
+  parent_key_id?: string | null;
+  /** The key this one replaced, if it came from a rotation. */
+  rotated_from_id?: string | null;
+  /** The approval policy: actions held for the person behind the key. */
+  require_approval?: {
+    min_danger?: 'read' | 'write' | 'destructive' | 'critical' | null;
+    actions?: string[];
+  } | null;
+  created_by?: {
+    type: string;
+    id: string | null;
+  } | null;
+  expires_at?: string | null;
+  last_used_at?: string | null;
+  revoked_at?: string | null;
+  created_at: string | null;
+  /** The key's value. Only on the answer that minted it; null on an idempotent replay of that answer, because the value is never stored. */
+  token?: string | null;
+}
+
+export interface LegacyLoginProbe {
+  /** What the declared legacy-login endpoint answered for the address, in words. */
+  result: string;
+}
+
+export interface ManifestSync {
+  /** The manifest matched what is already stored. */
+  unchanged: boolean;
+  roles_declared: number;
+  permissions_declared: number;
+  /** Roles stored here that the manifest no longer declares. */
+  orphaned_role_keys: string[];
+  orphaned_permission_keys: string[];
+}
+
+export interface SelfServiceSignup {
+  enabled: boolean;
+  /** False on a single-tenant install, where sign-up follows CBOX_ID_SIGNUP_MODE and the switch changes nothing. */
+  decided_here: boolean;
+}
+
 export interface Device {
   id: string;
   install_id: string;
@@ -249,12 +300,21 @@ export interface Webhook {
   event_types: string[];
   /** false while paused. */
   active: boolean;
+  /**
+   * How deliveries are signed. `cbox`: `X-Cbox-Timestamp` and
+   * `X-Cbox-Signature: t=<ts>,v1=<hex HMAC-SHA256 of "<ts>.<body>">`.
+   * `standard_webhooks`: `webhook-id`, `webhook-timestamp` and
+   * `webhook-signature: v1,<base64 HMAC-SHA256 of "<id>.<ts>.<body>">`, verifiable
+   * with any Standard Webhooks library. Only the chosen scheme's headers are sent.
+   */
+  signature_scheme: 'cbox' | 'standard_webhooks';
   consecutive_failures?: number;
   last_success_at?: string | null;
   created_at?: string | null;
   /**
    * The signing secret, on the create and rotate answers only — shown once, never
-   * retrievable again. `null` on an idempotent replay of that answer.
+   * retrievable again. `null` on an idempotent replay of that answer. 64 hex
+   * characters under `cbox`; a `whsec_` secret under `standard_webhooks`.
    */
   secret?: string | null;
 }
@@ -274,16 +334,45 @@ export interface InlineHook {
 export interface LogStream {
   id: string;
   name: string;
-  destination: 'splunk_hec' | 'elastic_ecs' | 'graylog_gelf' | 'cef_http' | 'generic_json';
+  destination: 'splunk_hec' | 'elastic_ecs' | 'graylog_gelf' | 'cef_http' | 'generic_json' | 'datadog' | 's3' | 'gcs';
+  /** Where entries go. For Datadog, S3 and GCS, derived from the site or region unless a custom endpoint was given. */
   endpoint_url: string;
+  /** An HTTP collector's scheme; `none` for the cloud destinations, which authenticate their own way. */
   auth: 'none' | 'bearer' | 'splunk' | 'hmac';
+  /** Datadog, S3 and GCS: the destination's settings, as stored. Never a credential — the API key, secret access key or service-account key is the encrypted secret. null for an HTTP collector. */
+  options: {
+    site?: 'datadoghq.com' | 'us3.datadoghq.com' | 'us5.datadoghq.com' | 'datadoghq.eu' | 'ap1.datadoghq.com' | 'ap2.datadoghq.com' | 'ddog-gov.com';
+    service?: string;
+    source?: string;
+    hostname?: string;
+    /** Comma-separated `key:value` tags (`ddtags`). */
+    tags?: string;
+    bucket?: string;
+    region?: string;
+    prefix?: string;
+    access_key_id?: string;
+    role_arn?: string;
+    external_id?: string;
+    sse?: 'AES256' | 'aws:kms';
+    kms_key_id?: string;
+    path_style?: boolean;
+    gzip?: boolean;
+  } | null;
+  /** An assumed-role S3 stream's external ID, generated for it: the role's trust policy must require it (`sts:ExternalId`). null otherwise. */
+  external_id: string | null;
   /** null when the environment owns it: it carries EVERY organization's entries. */
   organization_id: string | null;
   enabled: boolean;
+  /** `degraded`: recent transient failures, still retrying. `paused`: the circuit is open after repeated failures and resumes on its own. `action_required`: the destination refused the credential or the settings — update the stream, or run a successful test. */
+  health: 'healthy' | 'degraded' | 'paused' | 'action_required';
   consecutive_failures?: number;
   last_success_at?: string | null;
+  /** The latest failure, scrubbed of the stream's secret. */
+  last_error?: string | null;
+  last_failure_kind?: 'transient' | 'authentication' | 'configuration' | null;
+  last_failure_at?: string | null;
   created_at?: string | null;
-  /** A generated HMAC key, on the create answer only — shown once. `null` on an idempotent replay. */
+  /** A generated HMAC key, on the answer that generated it only — shown once. `null` on an idempotent replay. A credential the caller supplied is never echoed. */
   secret?: string | null;
 }
 
@@ -599,10 +688,12 @@ export interface SsoConnection {
     issuer?: string;
     client_id?: string;
   };
-  /** What to paste into the identity provider: this connection's own entity id and ACS URL (SAML), or its redirect URI (OIDC). null for a social sign-in connection. */
+  /** What to paste into the identity provider: this connection's own entity id, ACS URL and SP metadata URL (SAML), or its redirect URI (OIDC). null for a social sign-in connection. */
   service_provider?: {
     sp_entity_id?: string;
     sp_acs_url?: string;
+    /** SAML: this connection's service-provider metadata (entity id and ACS URL as one XML document), for an identity provider that imports SP metadata. Served for a draft too, before the identity provider's half is known. */
+    sp_metadata_url?: string;
     redirect_uri?: string;
   } | null;
   created_at?: string | null;
@@ -638,8 +729,10 @@ export interface SsoCertificates {
 
 export interface LogStreamTest {
   id: string;
-  /** Whether the destination accepted the test entry. */
+  /** Whether the destination accepted the test event (action `siem.stream.test`). */
   delivered: boolean;
+  /** Why not: `transient` (unreachable, busy — retrying can help) or `authentication` / `configuration` (somebody has to fix the stream). null when delivered. */
+  failure: 'transient' | 'authentication' | 'configuration' | null;
   /** The destination's refusal, scrubbed of the stream's secret. */
   error: string | null;
   tested_at: string;
@@ -682,6 +775,33 @@ export interface PortalLink {
    */
   url: string | null;
   expires_at: string | null;
+}
+
+/** An Admin Portal link as a list shows it. Never its URL: that was shown once, when it was minted, and only its hash is kept. */
+export interface PortalLinkRecord {
+  id: string;
+  organization_id: string;
+  /** What the link may set up. */
+  intents: Array<'sso' | 'dsync' | 'domain_verification' | 'log_streams' | 'certificate_renewal' | 'audit_logs'>;
+  /**
+   * `pending`: not opened yet, and it still can be. `in_use`: opened, and the setup
+   * session it started may still be running. `completed`: its setup was finished.
+   * `expired`: never opened in time, or its setup session ran out. `revoked`: withdrawn.
+   */
+  status: 'pending' | 'in_use' | 'completed' | 'expired' | 'revoked';
+  created_at: string | null;
+  /** Who minted it: the console person's id, or the management key's. */
+  created_by: string;
+  /** The address it was mailed to, or null when it was not sent. */
+  emailed_to: string | null;
+  /** How long it could wait to be opened. */
+  expires_at: string | null;
+  /** When it was opened. It is single-use. */
+  consumed_at: string | null;
+  /** When its setup was finished. */
+  completed_at: string | null;
+  /** When it was withdrawn. */
+  revoked_at: string | null;
 }
 
 /**
@@ -1222,7 +1342,7 @@ export type AppsManifestSetResponse = {
 
 /** Response body of `apps.manifest.sync`. */
 export type AppsManifestSyncResponse = {
-  data: Record<string, unknown>;
+  data: ManifestSync;
 };
 
 /** Request body of `apps.scopes.set`. */
@@ -1948,7 +2068,7 @@ export interface KeysCreateBody {
 
 /** Response body of `keys.create`. */
 export type KeysCreateResponse = {
-  data: Record<string, unknown>;
+  data: ManagementKey;
 };
 
 /** Query parameters of `keys.list`. */
@@ -1961,7 +2081,7 @@ export interface KeysListQuery {
 
 /** Response body of `keys.list`. */
 export type KeysListResponse = {
-  data: Array<Record<string, unknown>>;
+  data: ManagementKey[];
   meta: PageMeta;
 };
 
@@ -1976,7 +2096,7 @@ export interface KeysRotateBody {
 
 /** Response body of `keys.rotate`. */
 export type KeysRotateResponse = {
-  data: Record<string, unknown>;
+  data: ManagementKey;
 };
 
 /** Response body of `legacy_login.approve`. */
@@ -1997,7 +2117,7 @@ export interface LegacyLoginProbeBody {
 
 /** Response body of `legacy_login.probe`. */
 export type LegacyLoginProbeResponse = {
-  data: Record<string, unknown>;
+  data: LegacyLoginProbe;
 };
 
 /** Response body of `legacy_login.revoke`. */
@@ -2008,13 +2128,44 @@ export type LegacyLoginRevokeResponse = {
 /** Request body of `log_streams.create`. */
 export interface LogStreamsCreateBody {
   name: string;
-  destination: 'splunk_hec' | 'elastic_ecs' | 'graylog_gelf' | 'cef_http' | 'generic_json';
-  /** A public URL the entries are POSTed to. */
-  endpoint_url: string;
-  /** How the endpoint is authenticated. Left out, the destination's default. */
+  destination: 'splunk_hec' | 'elastic_ecs' | 'graylog_gelf' | 'cef_http' | 'generic_json' | 'datadog' | 's3' | 'gcs';
+  /** An HTTP collector: the public URL entries are POSTed to (required). Datadog, S3 and GCS: leave out for the destination's own endpoint, or an https URL of an S3-compatible store (MinIO, R2). */
+  endpoint_url?: string | null;
+  /** An HTTP collector: how the endpoint is authenticated. Left out, the destination's default. The cloud destinations authenticate their own way. */
   auth?: 'none' | 'bearer' | 'splunk' | 'hmac';
-  /** The bearer or Splunk token the endpoint expects. Left out with `hmac`, a key is generated and returned once. */
+  /** The credential, never echoed: the bearer or Splunk token (HTTP collectors; left out with `hmac`, a key is generated and returned once), the Datadog API key, the S3 secret access key (none with `role_arn`), or the GCS service-account JSON key. */
   secret?: string | null;
+  /** Datadog, S3 and GCS only: the destination's settings. An HTTP collector takes none. */
+  options?: {
+    /** Datadog: the site your account lives on — the domain you sign in at, e.g. `datadoghq.eu` for EU1. Default `datadoghq.com` (US1). An API key only works on its own site. */
+    site?: 'datadoghq.com' | 'us3.datadoghq.com' | 'us5.datadoghq.com' | 'datadoghq.eu' | 'ap1.datadoghq.com' | 'ap2.datadoghq.com' | 'ddog-gov.com' | null;
+    /** Datadog: the `service` attribute on every entry. Default: this platform's name. */
+    service?: string | null;
+    /** Datadog: the `ddsource` attribute. Default `cbox`. */
+    source?: string | null;
+    /** Datadog: `key:value` tags (`ddtags`) on every entry, e.g. `env:prod`. */
+    tags?: string[] | null;
+    /** Datadog: the `hostname` attribute. Default: this platform's host. */
+    hostname?: string | null;
+    /** S3 and GCS: the bucket objects are written to. */
+    bucket?: string | null;
+    /** S3: the bucket's AWS Region, e.g. `eu-west-1` (`auto` for Cloudflare R2). */
+    region?: string | null;
+    /** S3 and GCS: the object key prefix, e.g. `cbox/audit`. Objects are written to `{prefix}/{yyyy}/{mm}/{dd}/{hh}/{batch}.ndjson.gz`. */
+    prefix?: string | null;
+    /** S3 with an access key: the IAM access key ID. Its secret access key is the stream's `secret`. */
+    access_key_id?: string | null;
+    /** S3 with an assumed role: the IAM role the platform assumes. No secret is stored; the role's trust policy must require the stream's `external_id`. */
+    role_arn?: string | null;
+    /** S3: server-side encryption requested on every object. Left out, the bucket's default. */
+    sse?: 'AES256' | 'aws:kms' | null;
+    /** S3 with `aws:kms`: the KMS key ID, alias or ARN. */
+    kms_key_id?: string | null;
+    /** S3: path-style addressing. Default: virtual-hosted on AWS, path-style on a custom endpoint (MinIO, R2). */
+    path_style?: boolean | null;
+    /** S3 and GCS: gzip each object (`.ndjson.gz`). Default true. */
+    gzip?: boolean | null;
+  };
   /** The organization it belongs to; it carries that organization's traffic only. Send this or environment_wide. */
   organization_id?: string | null;
   /** True to make it the environment's own, carrying EVERY organization's traffic. Send this or organization_id. */
@@ -2055,8 +2206,48 @@ export type LogStreamsTestResponse = {
 
 /** Request body of `log_streams.update`. */
 export interface LogStreamsUpdateBody {
+  name?: string;
+  /** Changing it starts the stream's options and credential afresh. */
+  destination?: 'splunk_hec' | 'elastic_ecs' | 'graylog_gelf' | 'cef_http' | 'generic_json' | 'datadog' | 's3' | 'gcs';
+  /** An HTTP collector's URL; for Datadog, S3 and GCS empty means the destination's own endpoint. */
+  endpoint_url?: string | null;
+  /** An HTTP collector only. */
+  auth?: 'none' | 'bearer' | 'splunk' | 'hmac';
+  /** A new credential (token, API key, secret access key or service-account JSON key). Left out, the current one is kept. Never echoed. */
+  secret?: string | null;
+  /** Datadog, S3 and GCS only: the destination's settings. An HTTP collector takes none. */
+  options?: {
+    /** Datadog: the site your account lives on — the domain you sign in at, e.g. `datadoghq.eu` for EU1. Default `datadoghq.com` (US1). An API key only works on its own site. */
+    site?: 'datadoghq.com' | 'us3.datadoghq.com' | 'us5.datadoghq.com' | 'datadoghq.eu' | 'ap1.datadoghq.com' | 'ap2.datadoghq.com' | 'ddog-gov.com' | null;
+    /** Datadog: the `service` attribute on every entry. Default: this platform's name. */
+    service?: string | null;
+    /** Datadog: the `ddsource` attribute. Default `cbox`. */
+    source?: string | null;
+    /** Datadog: `key:value` tags (`ddtags`) on every entry, e.g. `env:prod`. */
+    tags?: string[] | null;
+    /** Datadog: the `hostname` attribute. Default: this platform's host. */
+    hostname?: string | null;
+    /** S3 and GCS: the bucket objects are written to. */
+    bucket?: string | null;
+    /** S3: the bucket's AWS Region, e.g. `eu-west-1` (`auto` for Cloudflare R2). */
+    region?: string | null;
+    /** S3 and GCS: the object key prefix, e.g. `cbox/audit`. Objects are written to `{prefix}/{yyyy}/{mm}/{dd}/{hh}/{batch}.ndjson.gz`. */
+    prefix?: string | null;
+    /** S3 with an access key: the IAM access key ID. Its secret access key is the stream's `secret`. */
+    access_key_id?: string | null;
+    /** S3 with an assumed role: the IAM role the platform assumes. No secret is stored; the role's trust policy must require the stream's `external_id`. */
+    role_arn?: string | null;
+    /** S3: server-side encryption requested on every object. Left out, the bucket's default. */
+    sse?: 'AES256' | 'aws:kms' | null;
+    /** S3 with `aws:kms`: the KMS key ID, alias or ARN. */
+    kms_key_id?: string | null;
+    /** S3: path-style addressing. Default: virtual-hosted on AWS, path-style on a custom endpoint (MinIO, R2). */
+    path_style?: boolean | null;
+    /** S3 and GCS: gzip each object (`.ndjson.gz`). Default true. */
+    gzip?: boolean | null;
+  };
   /** True to deliver; false to stop, keeping what is pending. */
-  enabled: boolean;
+  enabled?: boolean;
 }
 
 /** Response body of `log_streams.update`. */
@@ -2239,6 +2430,14 @@ export interface OrganizationsPortalLinksCreateBody {
 export type OrganizationsPortalLinksCreateResponse = {
   data: PortalLink;
 };
+
+/** Response body of `organizations.portal_links.list`. */
+export type OrganizationsPortalLinksListResponse = {
+  data: PortalLinkRecord[];
+};
+
+/** Response body of `organizations.portal_links.revoke`. */
+export type OrganizationsPortalLinksRevokeResponse = void;
 
 /** Response body of `organizations.reactivate`. */
 export type OrganizationsReactivateResponse = {
@@ -2595,7 +2794,7 @@ export interface SigninSelfServiceSignupSetBody {
 
 /** Response body of `signin.self_service_signup.set`. */
 export type SigninSelfServiceSignupSetResponse = {
-  data: Record<string, unknown>;
+  data: SelfServiceSignup;
 };
 
 /** Request body of `signin.social.delete`. */
@@ -2627,7 +2826,7 @@ export type SigninSocialListResponse = {
 export interface SigninSocialSetBody {
   /** The organization whose sign-in page offers it. */
   organization_id: string;
-  /** The catalogue key: google, microsoft, okta, auth0, keycloak, gitlab, slack, github, discord, apple, facebook. */
+  /** The catalogue key: google, microsoft, okta, auth0, keycloak, gitlab, slack, github, discord, apple, facebook, linkedin, bitbucket, xero, intuit. */
   provider: string;
   /** The client id from your own account with the provider. For Apple, the Services ID. */
   client_id: string;
@@ -2803,7 +3002,7 @@ export interface SsoConnectionsCreateBody {
   client_id?: string | null;
   /** OIDC: the client secret. Write-only. */
   client_secret?: string | null;
-  /** OIDC: the signing key. Write-only. */
+  /** OIDC, optional: the provider's ID-token signing key (an RS256 public key, PEM). Leave it out for any provider whose discovery document publishes a jwks_uri — the keys are read from there and follow its rotations. Needed only when it does not. Write-only. */
   signing_key?: string | null;
 }
 
@@ -2892,7 +3091,7 @@ export interface SsoConnectionsUpdateBody {
   client_id?: string | null;
   /** OIDC: the client secret. Write-only. */
   client_secret?: string | null;
-  /** OIDC: the signing key. Write-only. */
+  /** OIDC, optional: the provider's ID-token signing key (an RS256 public key, PEM). Leave it out for any provider whose discovery document publishes a jwks_uri — the keys are read from there and follow its rotations. Needed only when it does not. Write-only. */
   signing_key?: string | null;
 }
 
@@ -3243,6 +3442,8 @@ export interface WebhooksCreateBody {
   url: string;
   /** The events it receives. */
   event_types: Array<'user.created' | 'user.updated' | 'user.deactivated' | 'user.login' | 'user.reactivated' | 'identity.linked' | 'user.erased' | 'organization.created' | 'organization.suspended' | 'organization.reactivated' | 'organization.updated' | 'organization.deleted' | 'membership.created' | 'membership.updated' | 'membership.deleted' | 'invitation.created' | 'invitation.accepted' | 'invitation.revoked' | 'role.assigned' | 'role.unassigned' | 'role.assigned_everywhere' | 'role.unassigned_everywhere' | 'api_key.created' | 'api_key.revoked' | 'support_session.started' | 'directory.user.provisioned' | 'directory.user.deprovisioned' | 'directory.user.deactivated' | 'directory.group.membership_changed' | 'domain.added' | 'domain.removed' | 'domain.verified' | 'connection.activated' | 'connection.certificate_expiring' | 'entitlement.set' | 'entitlement.updated' | 'entitlement.revoked' | 'vault.grant.created' | 'vault.grant.revoked' | 'vault.secret.revoked' | 'governance.access.revoked'>;
+  /** How deliveries are signed: `cbox` (X-Cbox-Signature, the default) or `standard_webhooks` (webhook-id / webhook-timestamp / webhook-signature, verifiable with any Standard Webhooks library; the secret is a `whsec_` secret). */
+  signature_scheme?: 'cbox' | 'standard_webhooks';
   /** The organization it belongs to; it carries that organization's traffic only. Send this or environment_wide. */
   organization_id?: string | null;
   /** True to make it the environment's own, carrying EVERY organization's traffic. Send this or organization_id. */
@@ -3291,6 +3492,17 @@ export type WebhooksSecretRotateResponse = {
   data: Webhook;
 };
 
+/** Request body of `webhooks.signature_scheme.change`. */
+export interface WebhooksSignatureSchemeChangeBody {
+  /** The scheme deliveries are signed with from the next attempt. The secret is unchanged: under `standard_webhooks` a 64-hex secret is used as `whsec_` + base64 of the hex string. Update the receiver before you switch. */
+  signature_scheme: 'cbox' | 'standard_webhooks';
+}
+
+/** Response body of `webhooks.signature_scheme.change`. */
+export type WebhooksSignatureSchemeChangeResponse = {
+  data: Webhook;
+};
+
 /** Request body of `webhooks.update`. */
 export interface WebhooksUpdateBody {
   /** A public HTTPS URL. Left out, unchanged. */
@@ -3317,25 +3529,25 @@ export const environmentOperations = {
   'action_approvals.get': { action: null, operationId: null, method: 'GET', path: '/action-approvals/{id}', pathParams: ['id'], scope: null, danger: null, approval: false, body: false, pagination: null },
   'api_keys.list': { action: 'api_keys.list', operationId: 'api_keys_list', method: 'GET', path: '/organizations/{organization_id}/api-keys', pathParams: ['organization_id'], scope: 'api_keys:read', danger: null, approval: true, body: false, pagination: 'cursor' },
   'api_keys.revoke': { action: 'api_keys.revoke', operationId: 'api_keys_revoke', method: 'DELETE', path: '/api-keys/{id}', pathParams: ['id'], scope: 'api_keys:write', danger: null, approval: true, body: false, pagination: null },
-  'apis.create': { action: null, operationId: null, method: 'POST', path: '/apis', pathParams: [], scope: 'apis:write', danger: null, approval: false, body: true, pagination: null },
-  'apis.delete': { action: null, operationId: null, method: 'DELETE', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: null, approval: false, body: false, pagination: null },
-  'apis.get': { action: null, operationId: null, method: 'GET', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:read', danger: null, approval: false, body: false, pagination: null },
-  'apis.list': { action: null, operationId: null, method: 'GET', path: '/apis', pathParams: [], scope: 'apis:read', danger: null, approval: false, body: false, pagination: 'cursor' },
+  'apis.create': { action: null, operationId: null, method: 'POST', path: '/apis', pathParams: [], scope: 'apis:write', danger: null, approval: true, body: true, pagination: null },
+  'apis.delete': { action: null, operationId: null, method: 'DELETE', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: null, approval: true, body: false, pagination: null },
+  'apis.get': { action: null, operationId: null, method: 'GET', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:read', danger: null, approval: true, body: false, pagination: null },
+  'apis.list': { action: null, operationId: null, method: 'GET', path: '/apis', pathParams: [], scope: 'apis:read', danger: null, approval: true, body: false, pagination: 'cursor' },
   'apis.scopes.define': { action: 'apis.scopes.define', operationId: 'apis_scopes_define', method: 'PUT', path: '/apis/{id}/scopes/{key}', pathParams: ['id', 'key'], scope: 'apis:write', danger: 'write', approval: true, body: true, pagination: null },
   'apis.scopes.remove': { action: 'apis.scopes.remove', operationId: 'apis_scopes_remove', method: 'DELETE', path: '/apis/{id}/scopes/{key}', pathParams: ['id', 'key'], scope: 'apis:write', danger: 'destructive', approval: true, body: false, pagination: null },
-  'apis.update': { action: null, operationId: null, method: 'PATCH', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: null, approval: false, body: true, pagination: null },
+  'apis.update': { action: null, operationId: null, method: 'PATCH', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: null, approval: true, body: true, pagination: null },
   'approvals.deny': { action: 'approvals.deny', operationId: 'approvals_deny', method: 'POST', path: '/agent-requests/{request_id}/deny', pathParams: ['request_id'], scope: 'approvals:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'approvals.list': { action: 'approvals.list', operationId: 'approvals_list', method: 'GET', path: '/agent-requests', pathParams: [], scope: 'approvals:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
-  'apps.blueprint': { action: 'apps.blueprint', operationId: 'apps_blueprint', method: 'GET', path: '/apps/{id}/blueprint', pathParams: ['id'], scope: 'apps:read', danger: null, approval: false, body: false, pagination: null },
+  'apps.blueprint': { action: 'apps.blueprint', operationId: 'apps_blueprint', method: 'GET', path: '/apps/{id}/blueprint', pathParams: ['id'], scope: 'apps:read', danger: null, approval: true, body: false, pagination: null },
   'apps.copy': { action: 'apps.copy', operationId: 'apps_copy', method: 'POST', path: '/apps/{id}/copy', pathParams: ['id'], scope: 'apps:write', danger: 'critical', approval: true, body: true, pagination: null },
-  'apps.create': { action: 'apps.create', operationId: 'apps_create', method: 'POST', path: '/apps', pathParams: [], scope: 'apps:write', danger: 'critical', approval: false, body: true, pagination: null },
+  'apps.create': { action: 'apps.create', operationId: 'apps_create', method: 'POST', path: '/apps', pathParams: [], scope: 'apps:write', danger: 'critical', approval: true, body: true, pagination: null },
   'apps.delete': { action: 'apps.delete', operationId: 'apps_delete', method: 'DELETE', path: '/apps/{id}', pathParams: ['id'], scope: 'apps:write', danger: 'critical', approval: true, body: false, pagination: null },
   'apps.get': { action: 'apps.get', operationId: 'apps_get', method: 'GET', path: '/apps/{id}', pathParams: ['id'], scope: 'apps:read', danger: 'read', approval: true, body: false, pagination: null },
-  'apps.list': { action: 'apps.list', operationId: 'apps_list', method: 'GET', path: '/apps', pathParams: [], scope: 'apps:read', danger: null, approval: false, body: false, pagination: 'cursor' },
+  'apps.list': { action: 'apps.list', operationId: 'apps_list', method: 'GET', path: '/apps', pathParams: [], scope: 'apps:read', danger: null, approval: true, body: false, pagination: 'cursor' },
   'apps.manifest.set': { action: 'apps.manifest.set', operationId: 'apps_manifest_set', method: 'PUT', path: '/apps/{id}/manifest', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
   'apps.manifest.sync': { action: 'apps.manifest.sync', operationId: 'apps_manifest_sync', method: 'POST', path: '/apps/{id}/manifest/sync', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: false, pagination: null },
   'apps.scopes.set': { action: 'apps.scopes.set', operationId: 'apps_scopes_set', method: 'PUT', path: '/apps/{id}/scopes', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
-  'apps.secrets.list': { action: 'apps.secrets.list', operationId: 'apps_secrets_list', method: 'GET', path: '/apps/{id}/secrets', pathParams: ['id'], scope: 'apps:read', danger: null, approval: false, body: false, pagination: null },
+  'apps.secrets.list': { action: 'apps.secrets.list', operationId: 'apps_secrets_list', method: 'GET', path: '/apps/{id}/secrets', pathParams: ['id'], scope: 'apps:read', danger: null, approval: true, body: false, pagination: null },
   'apps.secrets.revoke': { action: 'apps.secrets.revoke', operationId: 'apps_secrets_revoke', method: 'DELETE', path: '/apps/{id}/secrets/{secret_id}', pathParams: ['id', 'secret_id'], scope: 'apps:write', danger: 'critical', approval: true, body: false, pagination: null },
   'apps.secrets.rotate': { action: 'apps.secrets.rotate', operationId: 'apps_secrets_rotate', method: 'POST', path: '/apps/{id}/secrets', pathParams: ['id'], scope: 'apps:write', danger: 'critical', approval: true, body: true, pagination: null },
   'apps.settings.api_key_prefix': { action: 'apps.settings.api_key_prefix', operationId: 'apps_settings_api_key_prefix', method: 'PUT', path: '/apps/{id}/settings/api-key-prefix', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
@@ -3419,6 +3631,8 @@ export const environmentOperations = {
   'organizations.get': { action: 'organizations.get', operationId: 'organizations_get', method: 'GET', path: '/organizations/{id}', pathParams: ['id'], scope: 'organizations:read', danger: null, approval: true, body: false, pagination: null },
   'organizations.list': { action: 'organizations.list', operationId: 'organizations_list', method: 'GET', path: '/organizations', pathParams: [], scope: 'organizations:read', danger: null, approval: true, body: false, pagination: 'cursor' },
   'organizations.portal_links.create': { action: 'organizations.portal_links.create', operationId: 'organizations_portal_links_create', method: 'POST', path: '/organizations/{organization_id}/portal-links', pathParams: ['organization_id'], scope: 'portal_links:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'organizations.portal_links.list': { action: 'organizations.portal_links.list', operationId: 'organizations_portal_links_list', method: 'GET', path: '/organizations/{organization_id}/portal-links', pathParams: ['organization_id'], scope: 'portal_links:read', danger: 'read', approval: true, body: false, pagination: null },
+  'organizations.portal_links.revoke': { action: 'organizations.portal_links.revoke', operationId: 'organizations_portal_links_revoke', method: 'DELETE', path: '/organizations/{organization_id}/portal-links/{id}', pathParams: ['organization_id', 'id'], scope: 'portal_links:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'organizations.reactivate': { action: 'organizations.reactivate', operationId: 'organizations_reactivate', method: 'POST', path: '/organizations/{id}/reactivate', pathParams: ['id'], scope: 'organizations:write', danger: 'write', approval: true, body: false, pagination: null },
   'organizations.suspend': { action: 'organizations.suspend', operationId: 'organizations_suspend', method: 'POST', path: '/organizations/{id}/suspend', pathParams: ['id'], scope: 'organizations:write', danger: 'write', approval: true, body: false, pagination: null },
   'organizations.transfer_ownership': { action: 'organizations.transfer_ownership', operationId: 'organizations_transfer_ownership', method: 'POST', path: '/organizations/{id}/transfer-ownership', pathParams: ['id'], scope: 'organizations:write', danger: null, approval: true, body: true, pagination: null },
@@ -3508,6 +3722,7 @@ export const environmentOperations = {
   'webhooks.pause': { action: 'webhooks.pause', operationId: 'webhooks_pause', method: 'POST', path: '/webhooks/{id}/pause', pathParams: ['id'], scope: 'webhooks:write', danger: 'write', approval: true, body: false, pagination: null },
   'webhooks.resume': { action: 'webhooks.resume', operationId: 'webhooks_resume', method: 'POST', path: '/webhooks/{id}/resume', pathParams: ['id'], scope: 'webhooks:write', danger: 'write', approval: true, body: false, pagination: null },
   'webhooks.secret.rotate': { action: 'webhooks.secret.rotate', operationId: 'webhooks_secret_rotate', method: 'POST', path: '/webhooks/{id}/rotate', pathParams: ['id'], scope: 'webhooks:write', danger: 'critical', approval: true, body: false, pagination: null },
+  'webhooks.signature_scheme.change': { action: 'webhooks.signature_scheme.change', operationId: 'webhooks_signature_scheme_change', method: 'POST', path: '/webhooks/{id}/signature-scheme', pathParams: ['id'], scope: 'webhooks:write', danger: 'destructive', approval: true, body: true, pagination: null },
   'webhooks.update': { action: 'webhooks.update', operationId: 'webhooks_update', method: 'PATCH', path: '/webhooks/{id}', pathParams: ['id'], scope: 'webhooks:write', danger: 'write', approval: true, body: true, pagination: null },
 } as const satisfies Record<string, OperationSpec>;
 
@@ -3685,6 +3900,7 @@ export class EnvironmentClient {
      *
      * `POST /apis`
      * @scope `apis:write`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     create: <O extends CallOptions = CallOptions>(body: ApisCreateBody, options?: O): Promise<Outcome<ApisCreateResponse, O>> =>
       this.transport.call<ApisCreateResponse, O>(environmentOperations['apis.create'], [], body, options),
@@ -3696,6 +3912,7 @@ export class EnvironmentClient {
      *
      * `DELETE /apis/{id}`
      * @scope `apis:write`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     delete: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<ApisDeleteResponse, O>> =>
       this.transport.call<ApisDeleteResponse, O>(environmentOperations['apis.delete'], [id], undefined, options),
@@ -3706,6 +3923,7 @@ export class EnvironmentClient {
      *
      * `GET /apis/{id}`
      * @scope `apis:read`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<ApisGetResponse, O>> =>
       this.transport.call<ApisGetResponse, O>(environmentOperations['apis.get'], [id], undefined, options),
@@ -3716,6 +3934,7 @@ export class EnvironmentClient {
      *
      * `GET /apis`
      * @scope `apis:read`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: ApisListQuery, options?: O): Promise<Outcome<ApisListResponse, O>> =>
       this.transport.call<ApisListResponse, O>(environmentOperations['apis.list'], [], query, options),
@@ -3732,6 +3951,7 @@ export class EnvironmentClient {
      *
      * `PATCH /apis/{id}`
      * @scope `apis:write`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     update: <O extends CallOptions = CallOptions>(id: string, body?: ApisUpdateBody, options?: O): Promise<Outcome<ApisUpdateResponse, O>> =>
       this.transport.call<ApisUpdateResponse, O>(environmentOperations['apis.update'], [id], body, options),
@@ -3765,7 +3985,7 @@ export class EnvironmentClient {
 
   readonly approvals = {
     /**
-     * Deny a pending agent request (CIBA) for the person it was raised for: the agent gets access_denied and no token.
+     * Deny a pending approval request (CIBA) for the person it was raised for: the agent gets access_denied and no token.
      *
      * Requires scope `approvals:write`. Danger: destructive.
      *
@@ -3804,6 +4024,7 @@ export class EnvironmentClient {
      *
      * `GET /apps/{id}/blueprint` · action `apps.blueprint`
      * @scope `apps:read`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     blueprint: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<AppsBlueprintResponse, O>> =>
       this.transport.call<AppsBlueprintResponse, O>(environmentOperations['apps.blueprint'], [id], undefined, options),
@@ -3843,6 +4064,7 @@ export class EnvironmentClient {
      * `POST /apps` · action `apps.create`
      * @scope `apps:write`
      * @danger critical
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     create: <O extends CallOptions = CallOptions>(body?: AppsCreateBody, options?: O): Promise<Outcome<AppsCreateResponse, O>> =>
       this.transport.call<AppsCreateResponse, O>(environmentOperations['apps.create'], [], body, options),
@@ -3877,6 +4099,7 @@ export class EnvironmentClient {
      *
      * `GET /apps` · action `apps.list`
      * @scope `apps:read`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: AppsListQuery, options?: O): Promise<Outcome<AppsListResponse, O>> =>
       this.transport.call<AppsListResponse, O>(environmentOperations['apps.list'], [], query, options),
@@ -3946,6 +4169,7 @@ export class EnvironmentClient {
        *
        * `GET /apps/{id}/secrets` · action `apps.secrets.list`
        * @scope `apps:read`
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       list: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<AppsSecretsListResponse, O>> =>
         this.transport.call<AppsSecretsListResponse, O>(environmentOperations['apps.secrets.list'], [id], undefined, options),
@@ -4520,7 +4744,7 @@ export class EnvironmentClient {
 
   readonly hooks = {
     /**
-     * Register an inline hook at a hook point (token minting, login, registration, password change). Returns its signing secret once.
+     * Register a hook at a hook point (token minting, login, registration, password change). Returns its signing secret once.
      *
      * Requires scope `hooks:write`. Danger: critical.
      *
@@ -4532,7 +4756,7 @@ export class EnvironmentClient {
     create: <O extends CallOptions = CallOptions>(body: HooksCreateBody, options?: O): Promise<Outcome<HooksCreateResponse, O>> =>
       this.transport.call<HooksCreateResponse, O>(environmentOperations['hooks.create'], [], body, options),
     /**
-     * Remove an inline hook. It is no longer called at its hook point.
+     * Remove a hook. It is no longer called at its hook point.
      *
      * Requires scope `hooks:write`. Danger: destructive.
      *
@@ -4544,7 +4768,7 @@ export class EnvironmentClient {
     delete: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<HooksDeleteResponse, O>> =>
       this.transport.call<HooksDeleteResponse, O>(environmentOperations['hooks.delete'], [id], undefined, options),
     /**
-     * Get one inline hook: its URL, hook point, owner and whether it is active. Never its signing secret.
+     * Get one hook: its URL, hook point, owner and whether it is active. Never its signing secret.
      *
      * Requires scope `hooks:read`. Danger: read.
      *
@@ -4556,7 +4780,7 @@ export class EnvironmentClient {
     get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<HooksGetResponse, O>> =>
       this.transport.call<HooksGetResponse, O>(environmentOperations['hooks.get'], [id], undefined, options),
     /**
-     * List the inline hooks — endpoints called during sign-in and token issuance — with their hook point, owner and whether each is active.
+     * List the hooks — endpoints called during sign-in and token issuance — with their hook point, owner and whether each is active.
      *
      * Requires scope `hooks:read`. Danger: read.
      *
@@ -4571,7 +4795,7 @@ export class EnvironmentClient {
     listAll: (query?: Omit<HooksListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<InlineHook, void, undefined> =>
       this.transport.paginate(environmentOperations['hooks.list'], [], query as Record<string, unknown> | undefined, options),
     /**
-     * Pause (active: false) or activate (active: true) an inline hook.
+     * Pause (active: false) or activate (active: true) a hook.
      *
      * Requires scope `hooks:write`. Danger: critical.
      *
@@ -4685,7 +4909,7 @@ export class EnvironmentClient {
     list: <O extends CallOptions = CallOptions>(query?: KeysListQuery, options?: O): Promise<Outcome<KeysListResponse, O>> =>
       this.transport.call<KeysListResponse, O>(environmentOperations['keys.list'], [], query, options),
     /** Every item of `keys.list`, fetching pages as the iteration reaches them. */
-    listAll: (query?: Omit<KeysListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<Record<string, unknown>, void, undefined> =>
+    listAll: (query?: Omit<KeysListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<ManagementKey, void, undefined> =>
       this.transport.paginate(environmentOperations['keys.list'], [], query as Record<string, unknown> | undefined, options),
     /**
      * Revoke a management key and every key it minted, immediately.
@@ -4766,7 +4990,7 @@ export class EnvironmentClient {
 
   readonly logStreams = {
     /**
-     * Stream the audit trail to a SIEM (Splunk, Elastic, Graylog, CEF, JSON). A generated HMAC key is returned once.
+     * Stream the audit trail to a SIEM (Splunk, Elastic, Graylog, CEF, JSON), Datadog, or an S3 or GCS bucket. A generated HMAC key is returned once.
      *
      * Requires scope `log_streams:write`. Danger: critical.
      *
@@ -4817,7 +5041,7 @@ export class EnvironmentClient {
     listAll: (query?: Omit<LogStreamsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<LogStream, void, undefined> =>
       this.transport.paginate(environmentOperations['log_streams.list'], [], query as Record<string, unknown> | undefined, options),
     /**
-     * Send one test entry to a log stream now and report whether the SIEM accepted it.
+     * Send one test event to a log stream now and report whether the destination accepted it, and if not, why.
      *
      * Requires scope `log_streams:write`. Danger: write.
      *
@@ -4829,7 +5053,7 @@ export class EnvironmentClient {
     test: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<LogStreamsTestResponse, O>> =>
       this.transport.call<LogStreamsTestResponse, O>(environmentOperations['log_streams.test'], [id], undefined, options),
     /**
-     * Disable (enabled: false) or resume (enabled: true) an audit log stream. Disabled, entries are kept and delivered on resume.
+     * Change an audit log stream's name, destination, endpoint, options or credential (re-validated; resets its circuit breaker), or disable (enabled: false) / resume (enabled: true) it.
      *
      * Requires scope `log_streams:write`. Danger: critical.
      *
@@ -4838,7 +5062,7 @@ export class EnvironmentClient {
      * @danger critical
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
-    update: <O extends CallOptions = CallOptions>(id: string, body: LogStreamsUpdateBody, options?: O): Promise<Outcome<LogStreamsUpdateResponse, O>> =>
+    update: <O extends CallOptions = CallOptions>(id: string, body?: LogStreamsUpdateBody, options?: O): Promise<Outcome<LogStreamsUpdateResponse, O>> =>
       this.transport.call<LogStreamsUpdateResponse, O>(environmentOperations['log_streams.update'], [id], body, options),
   };
 
@@ -5140,6 +5364,34 @@ export class EnvironmentClient {
        */
       create: <O extends CallOptions = CallOptions>(organizationId: string, body: OrganizationsPortalLinksCreateBody, options?: O): Promise<Outcome<OrganizationsPortalLinksCreateResponse, O>> =>
         this.transport.call<OrganizationsPortalLinksCreateResponse, O>(environmentOperations['organizations.portal_links.create'], [organizationId], body, options),
+      /**
+       * List an organization's Admin Portal links
+       *
+       * Requires scope `portal_links:read`. Danger: read. The links minted in the last 30
+       * days, newest first — every link that can still be opened is among them, since a link
+       * waits a week at most. Each says what it opens, who minted it, whom it was mailed to
+       * and where it stands (`status`). Never the link itself: it was shown once, when it was
+       * minted, and only its hash is kept. Not paged.
+       *
+       * `GET /organizations/{organization_id}/portal-links` · action `organizations.portal_links.list`
+       * @scope `portal_links:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(organizationId: string, options?: O): Promise<Outcome<OrganizationsPortalLinksListResponse, O>> =>
+        this.transport.call<OrganizationsPortalLinksListResponse, O>(environmentOperations['organizations.portal_links.list'], [organizationId], undefined, options),
+      /**
+       * Withdraw an Admin Portal link: it can no longer be opened, and a setup session it already opened ends on its next request. What was already set up through it stays.
+       *
+       * Requires scope `portal_links:write`. Danger: destructive.
+       *
+       * `DELETE /organizations/{organization_id}/portal-links/{id}` · action `organizations.portal_links.revoke`
+       * @scope `portal_links:write`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      revoke: <O extends CallOptions = CallOptions>(organizationId: string, id: string, options?: O): Promise<Outcome<OrganizationsPortalLinksRevokeResponse, O>> =>
+        this.transport.call<OrganizationsPortalLinksRevokeResponse, O>(environmentOperations['organizations.portal_links.revoke'], [organizationId, id], undefined, options),
     },
   };
 
@@ -5359,7 +5611,7 @@ export class EnvironmentClient {
 
   readonly samlApps = {
     /**
-     * Register a SAML application that signs people in with their account here. Decides where assertions — and their attributes — are sent.
+     * Register a SAML app that signs people in with their account here. Decides where assertions — and their attributes — are sent.
      *
      * Requires scope `saml_apps:write`. Danger: critical.
      *
@@ -5371,7 +5623,7 @@ export class EnvironmentClient {
     create: <O extends CallOptions = CallOptions>(body: SamlAppsCreateBody, options?: O): Promise<Outcome<SamlAppsCreateResponse, O>> =>
       this.transport.call<SamlAppsCreateResponse, O>(environmentOperations['saml_apps.create'], [], body, options),
     /**
-     * Remove a SAML application. People can no longer sign in to it with their account here.
+     * Remove a SAML app. People can no longer sign in to it with their account here.
      *
      * Requires scope `saml_apps:write`. Danger: critical.
      *
@@ -5383,7 +5635,7 @@ export class EnvironmentClient {
     delete: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<SamlAppsDeleteResponse, O>> =>
       this.transport.call<SamlAppsDeleteResponse, O>(environmentOperations['saml_apps.delete'], [id], undefined, options),
     /**
-     * Read one SAML application: its entity id, ACS URL, NameID and attribute mappings. Never its certificate.
+     * Read one SAML app: its entity id, ACS URL, NameID and attribute mappings. Never its certificate.
      *
      * Requires scope `saml_apps:read`. Danger: read.
      *
@@ -5395,7 +5647,7 @@ export class EnvironmentClient {
     get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<SamlAppsGetResponse, O>> =>
       this.transport.call<SamlAppsGetResponse, O>(environmentOperations['saml_apps.get'], [id], undefined, options),
     /**
-     * List the SAML applications that trust this environment as their identity provider.
+     * List the SAML apps that trust this environment as their identity provider.
      *
      * Requires scope `saml_apps:read`. Danger: read.
      *
@@ -5410,7 +5662,7 @@ export class EnvironmentClient {
     listAll: (query?: Omit<SamlAppsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<SamlApp, void, undefined> =>
       this.transport.paginate(environmentOperations['saml_apps.list'], [], query as Record<string, unknown> | undefined, options),
     /**
-     * Change a SAML application's entity id, ACS URL, NameID, attribute mappings, signing certificate or owning organization.
+     * Change a SAML app's entity id, ACS URL, NameID, attribute mappings, signing certificate or owning organization.
      *
      * Requires scope `saml_apps:write`. Danger: critical.
      *
@@ -5426,7 +5678,7 @@ export class EnvironmentClient {
   readonly signin = {
     policy: {
       /**
-       * Read the sign-in rules (password, MFA, SSO, lockout): the environment baseline, or one organization's effective rules and override.
+       * Read the authentication policy (password, MFA, SSO, lockout): the environment baseline, or one organization's effective rules and override.
        *
        * Requires scope `signin:read`. Danger: read.
        *
@@ -5438,7 +5690,7 @@ export class EnvironmentClient {
       get: <O extends CallOptions = CallOptions>(query?: SigninPolicyGetQuery, options?: O): Promise<Outcome<SigninPolicyGetResponse, O>> =>
         this.transport.call<SigninPolicyGetResponse, O>(environmentOperations['signin.policy.get'], [], query, options),
       /**
-       * Drop one organization's sign-in rules override, so it inherits the environment baseline again.
+       * Drop one organization's authentication policy override, so it inherits the environment baseline again.
        *
        * Requires scope `signin:write`. Danger: critical.
        *
@@ -5450,7 +5702,7 @@ export class EnvironmentClient {
       inherit: <O extends CallOptions = CallOptions>(organizationId: string, options?: O): Promise<Outcome<SigninPolicyInheritResponse, O>> =>
         this.transport.call<SigninPolicyInheritResponse, O>(environmentOperations['signin.policy.inherit'], [organizationId], undefined, options),
       /**
-       * Change the sign-in rules of the environment baseline, or tighten one organization's override. Requiring SSO signs out password sessions.
+       * Change the authentication policy of the environment baseline, or tighten one organization's override. Requiring SSO signs out password sessions.
        *
        * Requires scope `signin:write`. Danger: critical.
        *
@@ -5478,7 +5730,7 @@ export class EnvironmentClient {
     },
     social: {
       /**
-       * Stop offering a social sign-in provider. People who used it keep their accounts.
+       * Stop offering a social login provider. People who used it keep their accounts.
        *
        * Requires scope `signin:write`. Danger: critical.
        *
@@ -5490,7 +5742,7 @@ export class EnvironmentClient {
       delete: <O extends CallOptions = CallOptions>(id: string, body?: SigninSocialDeleteBody, options?: O): Promise<Outcome<SigninSocialDeleteResponse, O>> =>
         this.transport.call<SigninSocialDeleteResponse, O>(environmentOperations['signin.social.delete'], [id], body, options),
       /**
-       * List the social sign-in providers (Google, GitHub, Apple…) enabled in this environment, optionally for one organization.
+       * List the social login providers (Google, GitHub, Apple…) enabled in this environment, optionally for one organization.
        *
        * Requires scope `signin:read`. Danger: read.
        *
@@ -5505,7 +5757,7 @@ export class EnvironmentClient {
       listAll: (query?: Omit<SigninSocialListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<SocialProvider, void, undefined> =>
         this.transport.paginate(environmentOperations['signin.social.list'], [], query as Record<string, unknown> | undefined, options),
       /**
-       * Enable a social sign-in provider (Google, GitHub, Apple…) for one organization with its client credentials. The secret is never returned.
+       * Enable a social login provider (Google, GitHub, Apple…) for one organization with its client credentials. The secret is never returned.
        *
        * Requires scope `signin:write`. Danger: critical.
        *
@@ -6300,6 +6552,20 @@ export class EnvironmentClient {
        */
       rotate: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<WebhooksSecretRotateResponse, O>> =>
         this.transport.call<WebhooksSecretRotateResponse, O>(environmentOperations['webhooks.secret.rotate'], [id], undefined, options),
+    },
+    signatureScheme: {
+      /**
+       * Change how a webhook endpoint's deliveries are signed (cbox or standard_webhooks). No new secret is issued: a hex secret is used as whsec_ + base64 of itself. Update the receiver first.
+       *
+       * Requires scope `webhooks:write`. Danger: destructive.
+       *
+       * `POST /webhooks/{id}/signature-scheme` · action `webhooks.signature_scheme.change`
+       * @scope `webhooks:write`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      change: <O extends CallOptions = CallOptions>(id: string, body: WebhooksSignatureSchemeChangeBody, options?: O): Promise<Outcome<WebhooksSignatureSchemeChangeResponse, O>> =>
+        this.transport.call<WebhooksSignatureSchemeChangeResponse, O>(environmentOperations['webhooks.signature_scheme.change'], [id], body, options),
     },
   };
 

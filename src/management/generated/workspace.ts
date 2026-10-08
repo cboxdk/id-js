@@ -6,11 +6,16 @@ import type { CallOptions, OperationSpec, Outcome } from '../types.js';
 
 // ── Schemas (components.schemas) ────────────────────────────────────────────────────────────
 
+export interface VerificationResend {
+  outcome: 'sent' | 'already_provisioned';
+  message: string;
+}
+
 export interface Organization {
   id?: string;
   name?: string;
   status?: 'active' | 'suspended';
-  /** The organization's projects with each one's plan/allowance. Present only for billing-readers (plans are per project). */
+  /** The workspace's projects with each one's plan/allowance. Present only for billing-readers (plans are per project). */
   projects?: Project[];
 }
 
@@ -145,7 +150,7 @@ export type ActionApprovalsGetResponse = {
 export interface EnvironmentsCreateBody {
   name: string;
   type?: 'production' | 'sandbox';
-  /** The project (billing anchor) to create the environment under. Defaults to the organization's first project when omitted. */
+  /** The project (billing anchor) to create the environment under. Defaults to the workspace's first project when omitted. */
   project_id?: string;
   /** Mint the environment's first management key in the same call. */
   initial_key?: {
@@ -280,7 +285,7 @@ export type ProjectsSuspendResponse = {
 
 /** Response body of `projects.verification.resend`. */
 export type ProjectsVerificationResendResponse = {
-  data: Record<string, unknown>;
+  data: VerificationResend;
 };
 
 /** Request body of `team.environment_access`. */
@@ -369,32 +374,32 @@ export type WorkspaceSettingsUpdateResponse = {
 /** Every operation of the Cbox ID — Workspace Management API — method, path, scope and danger — keyed by action name. */
 export const workspaceOperations = {
   'action_approvals.get': { action: null, operationId: null, method: 'GET', path: '/workspace/action-approvals/{id}', pathParams: ['id'], scope: null, danger: null, approval: false, body: false, pagination: null },
-  'environments.create': { action: 'environments.create', operationId: 'environments_create', method: 'POST', path: '/workspace/environments', pathParams: [], scope: 'environments:write', danger: 'critical', approval: false, body: true, pagination: null },
+  'environments.create': { action: 'environments.create', operationId: 'environments_create', method: 'POST', path: '/workspace/environments', pathParams: [], scope: 'environments:write', danger: 'critical', approval: true, body: true, pagination: null },
   'environments.domain.remove': { action: 'environments.domain.remove', operationId: 'environments_domain_remove', method: 'DELETE', path: '/workspace/environments/{environment_id}/domain', pathParams: ['environment_id'], scope: 'environments:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'environments.domain.request': { action: 'environments.domain.request', operationId: 'environments_domain_request', method: 'POST', path: '/workspace/environments/{environment_id}/domain', pathParams: ['environment_id'], scope: 'environments:write', danger: 'write', approval: true, body: true, pagination: null },
   'environments.domain.verify': { action: 'environments.domain.verify', operationId: 'environments_domain_verify', method: 'POST', path: '/workspace/environments/{environment_id}/domain/verify', pathParams: ['environment_id'], scope: 'environments:write', danger: 'write', approval: true, body: false, pagination: null },
-  'environments.list': { action: 'environments.list', operationId: 'environments_list', method: 'GET', path: '/workspace/environments', pathParams: [], scope: 'workspace:read', danger: null, approval: false, body: false, pagination: 'page' },
+  'environments.list': { action: 'environments.list', operationId: 'environments_list', method: 'GET', path: '/workspace/environments', pathParams: [], scope: 'workspace:read', danger: null, approval: true, body: false, pagination: 'page' },
   'keys.environment.create': { action: 'keys.environment.create', operationId: 'keys_environment_create', method: 'POST', path: '/workspace/environments/{environment_id}/keys', pathParams: ['environment_id'], scope: 'keys:write', danger: 'critical', approval: true, body: true, pagination: null },
   'keys.environment.revoke': { action: 'keys.environment.revoke', operationId: 'keys_environment_revoke', method: 'DELETE', path: '/workspace/environments/{environment_id}/keys/{id}', pathParams: ['environment_id', 'id'], scope: 'keys:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'keys.workspace.create': { action: 'keys.workspace.create', operationId: 'keys_workspace_create', method: 'POST', path: '/workspace/keys', pathParams: [], scope: 'keys:write', danger: 'critical', approval: true, body: true, pagination: null },
   'keys.workspace.list': { action: 'keys.workspace.list', operationId: 'keys_workspace_list', method: 'GET', path: '/workspace/keys', pathParams: [], scope: 'workspace:read', danger: 'read', approval: true, body: false, pagination: 'page' },
   'keys.workspace.revoke': { action: 'keys.workspace.revoke', operationId: 'keys_workspace_revoke', method: 'DELETE', path: '/workspace/keys/{id}', pathParams: ['id'], scope: 'keys:write', danger: 'destructive', approval: true, body: false, pagination: null },
-  'projects.create': { action: 'projects.create', operationId: 'projects_create', method: 'POST', path: '/workspace/projects', pathParams: [], scope: 'projects:write', danger: null, approval: false, body: true, pagination: null },
-  'projects.list': { action: 'projects.list', operationId: 'projects_list', method: 'GET', path: '/workspace/projects', pathParams: [], scope: 'workspace:read', danger: null, approval: false, body: false, pagination: null },
+  'projects.create': { action: 'projects.create', operationId: 'projects_create', method: 'POST', path: '/workspace/projects', pathParams: [], scope: 'projects:write', danger: null, approval: true, body: true, pagination: null },
+  'projects.list': { action: 'projects.list', operationId: 'projects_list', method: 'GET', path: '/workspace/projects', pathParams: [], scope: 'workspace:read', danger: null, approval: true, body: false, pagination: null },
   'projects.reactivate': { action: 'projects.reactivate', operationId: 'projects_reactivate', method: 'POST', path: '/workspace/projects/{id}/reactivate', pathParams: ['id'], scope: 'projects:write', danger: 'write', approval: true, body: false, pagination: null },
   'projects.rename': { action: 'projects.rename', operationId: 'projects_rename', method: 'PATCH', path: '/workspace/projects/{id}', pathParams: ['id'], scope: 'projects:write', danger: 'write', approval: true, body: true, pagination: null },
   'projects.suspend': { action: 'projects.suspend', operationId: 'projects_suspend', method: 'POST', path: '/workspace/projects/{id}/suspend', pathParams: ['id'], scope: 'projects:write', danger: 'write', approval: true, body: false, pagination: null },
   'projects.verification.resend': { action: 'projects.verification.resend', operationId: 'projects_verification_resend', method: 'POST', path: '/workspace/projects/verification/resend', pathParams: [], scope: 'projects:write', danger: 'write', approval: true, body: false, pagination: null },
   'team.environment_access': { action: 'team.environment_access', operationId: 'team_environment_access', method: 'PUT', path: '/workspace/members/{id}/access', pathParams: ['id'], scope: 'team:write', danger: 'write', approval: true, body: true, pagination: null },
-  'team.invitations.list': { action: 'team.invitations.list', operationId: 'team_invitations_list', method: 'GET', path: '/workspace/invitations', pathParams: [], scope: 'team:read', danger: null, approval: false, body: false, pagination: null },
-  'team.invitations.resend': { action: 'team.invitations.resend', operationId: 'team_invitations_resend', method: 'POST', path: '/workspace/invitations/{id}/resend', pathParams: ['id'], scope: 'team:write', danger: null, approval: false, body: false, pagination: null },
-  'team.invitations.revoke': { action: 'team.invitations.revoke', operationId: 'team_invitations_revoke', method: 'DELETE', path: '/workspace/invitations/{id}', pathParams: ['id'], scope: 'team:write', danger: null, approval: false, body: false, pagination: null },
-  'team.invite': { action: 'team.invite', operationId: 'team_invite', method: 'POST', path: '/workspace/members', pathParams: [], scope: 'team:write', danger: null, approval: false, body: true, pagination: null },
-  'team.list': { action: 'team.list', operationId: 'team_list', method: 'GET', path: '/workspace/members', pathParams: [], scope: 'team:read', danger: null, approval: false, body: false, pagination: 'page' },
+  'team.invitations.list': { action: 'team.invitations.list', operationId: 'team_invitations_list', method: 'GET', path: '/workspace/invitations', pathParams: [], scope: 'team:read', danger: null, approval: true, body: false, pagination: null },
+  'team.invitations.resend': { action: 'team.invitations.resend', operationId: 'team_invitations_resend', method: 'POST', path: '/workspace/invitations/{id}/resend', pathParams: ['id'], scope: 'team:write', danger: null, approval: true, body: false, pagination: null },
+  'team.invitations.revoke': { action: 'team.invitations.revoke', operationId: 'team_invitations_revoke', method: 'DELETE', path: '/workspace/invitations/{id}', pathParams: ['id'], scope: 'team:write', danger: null, approval: true, body: false, pagination: null },
+  'team.invite': { action: 'team.invite', operationId: 'team_invite', method: 'POST', path: '/workspace/members', pathParams: [], scope: 'team:write', danger: null, approval: true, body: true, pagination: null },
+  'team.list': { action: 'team.list', operationId: 'team_list', method: 'GET', path: '/workspace/members', pathParams: [], scope: 'team:read', danger: null, approval: true, body: false, pagination: 'page' },
   'team.remove': { action: 'team.remove', operationId: 'team_remove', method: 'DELETE', path: '/workspace/members/{id}', pathParams: ['id'], scope: 'team:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'team.role': { action: 'team.role', operationId: 'team_role', method: 'PATCH', path: '/workspace/members/{id}/role', pathParams: ['id'], scope: 'team:write', danger: 'write', approval: true, body: true, pagination: null },
   'team.transfer_ownership': { action: 'team.transfer_ownership', operationId: 'team_transfer_ownership', method: 'POST', path: '/workspace/members/{id}/transfer-ownership', pathParams: ['id'], scope: 'team:write', danger: 'critical', approval: true, body: false, pagination: null },
-  'workspace.get': { action: 'workspace.get', operationId: 'workspace_get', method: 'GET', path: '/workspace', pathParams: [], scope: 'workspace:read', danger: null, approval: false, body: false, pagination: null },
+  'workspace.get': { action: 'workspace.get', operationId: 'workspace_get', method: 'GET', path: '/workspace', pathParams: [], scope: 'workspace:read', danger: null, approval: true, body: false, pagination: null },
   'workspace.settings.update': { action: 'workspace.settings.update', operationId: 'workspace_settings_update', method: 'PATCH', path: '/workspace', pathParams: [], scope: 'settings:write', danger: 'write', approval: true, body: true, pagination: null },
 } as const satisfies Record<string, OperationSpec>;
 
@@ -406,7 +411,7 @@ export type WorkspaceClientOptions = ManagementClientOptions;
 /**
  * Cbox ID — Workspace Management API.
  *
- * The **global organization-management plane** — above every environment. Manage the
+ * The **workspace plane** — the customer's own Cbox account, above every environment it owns. Manage the
  * workspace, its **projects** (IdP products, each a billing anchor) and their
  * environments, its team, and its keys with a workspace key.
  */
@@ -456,6 +461,7 @@ export class WorkspaceClient {
      * `POST /workspace/environments` · action `environments.create`
      * @scope `environments:write`
      * @danger critical
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     create: <O extends CallOptions = CallOptions>(body: EnvironmentsCreateBody, options?: O): Promise<Outcome<EnvironmentsCreateResponse, O>> =>
       this.transport.call<EnvironmentsCreateResponse, O>(workspaceOperations['environments.create'], [], body, options),
@@ -466,6 +472,7 @@ export class WorkspaceClient {
      *
      * `GET /workspace/environments` · action `environments.list`
      * @scope `workspace:read`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: EnvironmentsListQuery, options?: O): Promise<Outcome<EnvironmentsListResponse, O>> =>
       this.transport.call<EnvironmentsListResponse, O>(workspaceOperations['environments.list'], [], query, options),
@@ -568,7 +575,7 @@ export class WorkspaceClient {
       listAll: (query?: Omit<KeysWorkspaceListQuery, 'page'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<WorkspaceKey, void, undefined> =>
         this.transport.paginate(workspaceOperations['keys.workspace.list'], [], query as Record<string, unknown> | undefined, options),
       /**
-       * Revoke a workspace key, and every key it minted; whatever uses them stops immediately.
+       * Revoke a workspace key, and every key it minted on either plane (workspace keys and environment management keys, all the way down); whatever uses them stops immediately.
        *
        * Requires scope `keys:write` and a role that may `manage-environments` and `manage-members`. Danger: destructive.
        *
@@ -590,16 +597,18 @@ export class WorkspaceClient {
      *
      * `POST /workspace/projects` · action `projects.create`
      * @scope `projects:write`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     create: <O extends CallOptions = CallOptions>(body: ProjectsCreateBody, options?: O): Promise<Outcome<ProjectsCreateResponse, O>> =>
       this.transport.call<ProjectsCreateResponse, O>(workspaceOperations['projects.create'], [], body, options),
     /**
      * List projects
      *
-     * Requires scope `workspace:read` (any role). The organization's projects (IdP products). Each carries its own plan and environment allowance.
+     * Requires scope `workspace:read` (any role). The workspace's projects (IdP products). Each carries its own plan and environment allowance.
      *
      * `GET /workspace/projects` · action `projects.list`
      * @scope `workspace:read`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<ProjectsListResponse, O>> =>
       this.transport.call<ProjectsListResponse, O>(workspaceOperations['projects.list'], [], undefined, options),
@@ -672,7 +681,7 @@ export class WorkspaceClient {
      * Invite a member
      *
      * Requires scope `team:write` and the `manage-members` capability (owner/admin). Invites the address onto the
-     * organization's team — the same invitation the console's Team page sends: a mail naming
+     * workspace's team — the same invitation the console's Team page sends: a mail naming
      * this key as the inviter and the role, with a signed link on which the invitee sets a
      * password and is signed in. Owner is never invited; ownership is transferred. An
      * earlier pending invitation for the same address is superseded. List, re-send and
@@ -680,6 +689,7 @@ export class WorkspaceClient {
      *
      * `POST /workspace/members` · action `team.invite`
      * @scope `team:write`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     invite: <O extends CallOptions = CallOptions>(body: TeamInviteBody, options?: O): Promise<Outcome<TeamInviteResponse, O>> =>
       this.transport.call<TeamInviteResponse, O>(workspaceOperations['team.invite'], [], body, options),
@@ -690,6 +700,7 @@ export class WorkspaceClient {
      *
      * `GET /workspace/members` · action `team.list`
      * @scope `team:read`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: TeamListQuery, options?: O): Promise<Outcome<TeamListResponse, O>> =>
       this.transport.call<TeamListResponse, O>(workspaceOperations['team.list'], [], query, options),
@@ -740,6 +751,7 @@ export class WorkspaceClient {
        *
        * `GET /workspace/invitations` · action `team.invitations.list`
        * @scope `team:read`
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       list: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<TeamInvitationsListResponse, O>> =>
         this.transport.call<TeamInvitationsListResponse, O>(workspaceOperations['team.invitations.list'], [], undefined, options),
@@ -752,16 +764,18 @@ export class WorkspaceClient {
        *
        * `POST /workspace/invitations/{id}/resend` · action `team.invitations.resend`
        * @scope `team:write`
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       resend: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<TeamInvitationsResendResponse, O>> =>
         this.transport.call<TeamInvitationsResendResponse, O>(workspaceOperations['team.invitations.resend'], [id], undefined, options),
       /**
        * Withdraw an invitation
        *
-       * Requires scope `team:write` and the `manage-members` capability. The link stops working. An invitation that is not pending on this organization is a `404`.
+       * Requires scope `team:write` and the `manage-members` capability. The link stops working. An invitation that is not pending in this workspace is a `404`.
        *
        * `DELETE /workspace/invitations/{id}` · action `team.invitations.revoke`
        * @scope `team:write`
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       revoke: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<TeamInvitationsRevokeResponse, O>> =>
         this.transport.call<TeamInvitationsRevokeResponse, O>(workspaceOperations['team.invitations.revoke'], [id], undefined, options),
@@ -770,12 +784,13 @@ export class WorkspaceClient {
 
   readonly workspace = {
     /**
-     * Get the organization
+     * Get the workspace
      *
-     * Requires scope `workspace:read` (any role). Returns the organization's identity. The `projects` block (each project's plan/allowance) is included only for keys whose role can read billing (owner/admin/viewer — not developer).
+     * Requires scope `workspace:read` (any role). Returns the workspace's identity. The `projects` block (each project's plan/allowance) is included only for keys whose role can read billing (owner/admin/viewer — not developer).
      *
      * `GET /workspace` · action `workspace.get`
      * @scope `workspace:read`
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     get: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<WorkspaceGetResponse, O>> =>
       this.transport.call<WorkspaceGetResponse, O>(workspaceOperations['workspace.get'], [], undefined, options),

@@ -7,6 +7,11 @@ in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
 ### Added
 
+- `verifyStandardWebhook()`: verifies deliveries from an endpoint on the `standard_webhooks`
+  signature scheme (`webhook-id` / `webhook-timestamp` / `webhook-signature`, any valid `v1`
+  signature, 5-minute window). Takes a `whsec_…` secret or an endpoint's 64-hex Cbox secret.
+  Tested against the Standard Webhooks specification's vector.
+
 - `@cboxdk/id-js/management`: typed clients for Cbox ID's management planes, generated from
   the OpenAPI documents the server publishes. `EnvironmentClient` (an environment's own host,
   `cbid_env_…` key or delegated token), `WorkspaceClient` (`cbid_ws_…` key), `PlatformClient`

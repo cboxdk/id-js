@@ -14,8 +14,8 @@ export type {
 export { CboxIdClient } from './client.js';
 export type { CallbackParams, StoredAuthState } from './client.js';
 export type { DeviceAuthorization } from './types.js';
-export { verifyWebhook } from './webhook.js';
-export type { VerifyWebhookOptions } from './webhook.js';
+export { verifyWebhook, verifyStandardWebhook } from './webhook.js';
+export type { VerifyWebhookOptions, VerifyStandardWebhookOptions, WebhookHeaders } from './webhook.js';
 export { VaultClient } from './vault.js';
 export type { VaultSecretRef, VaultLease, StoreSecretInput } from './vault.js';
 export {

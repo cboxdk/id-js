@@ -506,6 +506,26 @@ const ok = await verifyWebhook({
 });
 ```
 
+### Standard Webhooks
+
+An endpoint registered with `signature_scheme: 'standard_webhooks'` (or switched with
+`env.webhooks.signatureScheme.change(id, { signature_scheme: 'standard_webhooks' })`) is
+signed the [Standard Webhooks](https://www.standardwebhooks.com/) way: `webhook-id`,
+`webhook-timestamp` and `webhook-signature`. Verify it with `verifyStandardWebhook`:
+
+```ts
+import { verifyStandardWebhook } from '@cboxdk/id-js';
+
+const ok = await verifyStandardWebhook({
+  payload: rawBody,            // the exact bytes received
+  headers: request.headers,    // a Headers object or a plain record
+  secret: process.env.CBOX_ID_WEBHOOK_SECRET!, // whsec_…, or the endpoint's old 64-hex secret
+});
+```
+
+It accepts any valid `v1` signature among several (sent while a secret rotates), uses the same
+5-minute freshness window, and never throws.
+
 ## Token Vault
 
 Broker downstream credentials (API keys for OpenAI, GitHub, …) through the instance's

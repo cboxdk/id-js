@@ -78,3 +78,99 @@ export async function verifyWebhook(options: VerifyWebhookOptions): Promise<bool
 
   return timingSafeEqual(expected, signature);
 }
+
+/** Headers as a `Headers` object or a plain record (Node's `IncomingHttpHeaders`, a framework's map). */
+export type WebhookHeaders = Headers | Record<string, string | readonly string[] | undefined>;
+
+export interface VerifyStandardWebhookOptions {
+  /** The RAW request body — the exact bytes received, not a re-encoded copy. */
+  payload: string;
+  /** The request headers; `webhook-id`, `webhook-timestamp` and `webhook-signature` are read. */
+  headers: WebhookHeaders;
+  /**
+   * The endpoint's secret: a `whsec_…` secret, or the 64-hex secret of an endpoint that
+   * moved from the `cbox` scheme (Cbox ID uses it as `whsec_` + base64 of the hex string,
+   * which keys the HMAC with the same bytes).
+   */
+  secret: string;
+  /** Freshness window in seconds. Defaults to 300 (5 minutes). */
+  toleranceSeconds?: number;
+  /** Injectable clock (unix seconds), for tests. Defaults to `Date.now()`. */
+  now?: number;
+}
+
+function header(headers: WebhookHeaders, name: string): string | undefined {
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+    return headers.get(name) ?? undefined;
+  }
+
+  const record = headers as Record<string, string | readonly string[] | undefined>;
+  const key = Object.keys(record).find((k) => k.toLowerCase() === name);
+  const value = key === undefined ? undefined : record[key];
+
+  return Array.isArray(value) ? value.join(' ') : (value as string | undefined);
+}
+
+function base64ToBytes(value: string): Uint8Array<ArrayBuffer> | null {
+  try {
+    const binary = atob(value);
+    return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+function toBase64(bytes: ArrayBuffer): string {
+  let binary = '';
+  for (const byte of new Uint8Array(bytes)) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+/**
+ * Verify a delivery from an endpoint on the `standard_webhooks` signature scheme
+ * ([Standard Webhooks](https://www.standardwebhooks.com/)): `webhook-signature` carries one or
+ * more space-separated `v1,<base64 HMAC-SHA256 of "{webhook-id}.{webhook-timestamp}.{body}">`,
+ * and the timestamp must be within the freshness window. Use {@link verifyWebhook} for the
+ * default `cbox` scheme (`X-Cbox-Signature`).
+ *
+ * Returns `true` only when a signature is present, fresh and valid. Never throws.
+ */
+export async function verifyStandardWebhook(options: VerifyStandardWebhookOptions): Promise<boolean> {
+  const { payload, headers, secret } = options;
+  const toleranceSeconds = options.toleranceSeconds ?? 300;
+  const now = options.now ?? Math.floor(Date.now() / 1000);
+
+  const id = header(headers, 'webhook-id');
+  const timestamp = header(headers, 'webhook-timestamp');
+  const signatures = header(headers, 'webhook-signature');
+
+  if (!id || !timestamp || !signatures || !/^\d+$/.test(timestamp)) {
+    return false;
+  }
+
+  if (Math.abs(now - Number(timestamp)) > toleranceSeconds) {
+    return false;
+  }
+
+  const keyBytes: Uint8Array<ArrayBuffer> | null = secret.startsWith('whsec_') ? base64ToBytes(secret.slice('whsec_'.length)) : new TextEncoder().encode(secret);
+
+  if (keyBytes === null || keyBytes.length === 0) {
+    return false;
+  }
+
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const expected = toBase64(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${id}.${timestamp}.${payload}`)));
+
+  // Several signatures may be sent while a secret rotates; any valid `v1` one is enough.
+  let valid = false;
+  for (const candidate of signatures.split(' ')) {
+    const [version, signature] = candidate.split(',', 2);
+    if (version === 'v1' && signature !== undefined && timingSafeEqual(expected, signature)) {
+      valid = true;
+    }
+  }
+
+  return valid;
+}

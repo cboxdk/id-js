@@ -485,6 +485,14 @@ describe('generated surface', () => {
       scope: 'audit_logs:write',
       danger: 'write',
     });
+    // Wave 7: typed key answers, signature schemes, log-stream tests, portal-link lifecycle.
+    expectTypeOf<EnvironmentApi.KeysCreateResponse['data']>().toEqualTypeOf<EnvironmentApi.ManagementKey>();
+    expectTypeOf<EnvironmentApi.LogStreamsTestResponse['data']>().toEqualTypeOf<EnvironmentApi.LogStreamTest>();
+    expect(environmentOperations['webhooks.signature_scheme.change']).toMatchObject({ method: 'POST', path: '/webhooks/{id}/signature-scheme' });
+    expect(typeof client.webhooks.signatureScheme.change).toBe('function');
+    expect(typeof client.logStreams.test).toBe('function');
+    expect(typeof client.organizations.portalLinks.list).toBe('function');
+    expect(typeof client.organizations.portalLinks.revoke).toBe('function');
     expect(environmentOperations['audit_logs.verify']).toMatchObject({ method: 'GET', path: '/audit-logs/verify', scope: 'audit_logs:read' });
     expectTypeOf<EnvironmentApi.OrganizationsPortalLinksCreateBody['intents']>().toEqualTypeOf<
       Array<'sso' | 'dsync' | 'domain_verification' | 'log_streams' | 'certificate_renewal' | 'audit_logs'>

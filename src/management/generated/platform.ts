@@ -170,7 +170,7 @@ export type OrganizationsSetStatusResponse = {
 
 /** Request body of `workspaces.create`. */
 export interface WorkspacesCreateBody {
-  /** The workspace's name — the customer company. */
+  /** The workspace's name — usually the company it belongs to. */
   name: string;
   /** The owner. An address that already has an account keeps it; the workspace is added to it. */
   owner_email: string;
@@ -348,7 +348,7 @@ export class PlatformClient {
 
   readonly workspaces = {
     /**
-     * Create a customer workspace with its owner, first project and first environment; the owner is emailed a link to set their password.
+     * Create a workspace with its owner, first project and first environment; the owner is emailed a link to set their password.
      *
      * Requires scope `operator:workspaces:write` on an access token delegated by an active platform operator. No management key is accepted. Danger: critical.
      *
@@ -360,7 +360,7 @@ export class PlatformClient {
     create: <O extends CallOptions = CallOptions>(body: WorkspacesCreateBody, options?: O): Promise<Outcome<WorkspacesCreateResponse, O>> =>
       this.transport.call<WorkspacesCreateResponse, O>(platformOperations['platform.workspaces.create'], [], body, options),
     /**
-     * Suspend a customer workspace (its people can no longer sign in, its environments stop serving) or reactivate it.
+     * Suspend a workspace (its people can no longer sign in, its environments stop serving) or reactivate it.
      *
      * Requires scope `operator:workspaces:write` on an access token delegated by an active platform operator. No management key is accepted. Danger: critical.
      *
