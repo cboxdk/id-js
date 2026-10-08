@@ -78,7 +78,7 @@ export interface ApiResponse<TBody> {
   readonly replayed: boolean;
   /** The `Idempotency-Key` a write was sent with. */
   readonly idempotencyKey: string | undefined;
-  /** The `X-Request-Id` response header, when something set one. */
+  /** The id the server served the request under (`X-Request-Id`). */
   readonly requestId: string | null;
   readonly headers: Headers;
 }

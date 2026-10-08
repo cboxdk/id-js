@@ -21,7 +21,7 @@ export class CboxIdApiError extends CboxIdError {
    * (`{ name: ['The name field is required.'] }`). Empty otherwise.
    */
   readonly errors: Readonly<Record<string, readonly string[]>>;
-  /** The `X-Request-Id` of the failed response, when something on the way set one. */
+  /** The id the server served the request under (`request_id`, else `X-Request-Id`). Quote it when reporting a problem. */
   readonly requestId: string | null;
   /** Seconds to wait, off `Retry-After` — set on a `429` the client gave up retrying. */
   readonly retryAfter: number | undefined;

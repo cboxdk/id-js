@@ -50,6 +50,13 @@ export interface ManagementClientOptions {
    * so it can refresh). Platform and account planes accept nothing else.
    */
   accessToken?: string | (() => string | Promise<string>);
+  /**
+   * Environment plane only, with a person's access token on the PLATFORM ROOT's host: the
+   * environment to act in, by id or slug, sent as `Cbox-Environment` on every request. One
+   * root token and the root `baseUrl` can then drive any environment of the person's
+   * workspace. Not used with a key, which is bound to its own environment's host.
+   */
+  environment?: string;
   /** Present `accessToken` as a DPoP-bound token, with a proof per request. */
   dpop?: DPoPSigner;
   /**
@@ -263,6 +270,22 @@ export class ManagementTransport {
       }
     }
 
+    if (options.environment !== undefined) {
+      if (plane !== 'environment') {
+        throw new ConfigurationError(`\`environment\` applies to the environment plane, not the ${plane} plane.`);
+      }
+
+      if (options.environment === '') {
+        throw new ConfigurationError('Management client `environment` is empty.');
+      }
+
+      if (hasKey) {
+        throw new ConfigurationError(
+          '`environment` names the environment for a root access token. A `cbid_env_…` key is bound to its own environment\'s host: use that host as `baseUrl` instead.',
+        );
+      }
+    }
+
     this.plane = plane;
     this.baseUrl = normalizeBaseUrl(baseUrl);
     this.#options = options;
@@ -416,6 +439,10 @@ export class ManagementTransport {
 
     if (send.approvalId !== undefined) {
       headers.set('cbox-approval', send.approvalId);
+    }
+
+    if (this.#options.environment !== undefined) {
+      headers.set('cbox-environment', this.#options.environment);
     }
 
     if (this.#options.apiKey !== undefined) {
@@ -700,12 +727,15 @@ export class ManagementTransport {
 
     const retryAfter = retryAfterMs(response.headers);
 
+    // The envelope's `request_id` first: a proxy in between may rewrite or drop the header.
+    const requestId = typeof fields.request_id === 'string' && fields.request_id !== '' ? fields.request_id : response.headers.get('x-request-id');
+
     return new CboxIdApiError({
       status: response.status,
       error: code,
       message,
       errors,
-      requestId: response.headers.get('x-request-id'),
+      requestId,
       retryAfter: retryAfter === undefined ? undefined : Math.ceil(retryAfter / 1000),
     });
   }

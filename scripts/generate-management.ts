@@ -40,7 +40,7 @@ export const PLANES: PlaneConfig[] = [
     file: 'environment',
     className: 'EnvironmentClient',
     specPath: '/api/v1/environment/openapi.yaml',
-    schemes: ['EnvironmentApiKey', 'ManagementAccessToken'],
+    schemes: ['EnvironmentApiKey', 'ManagementAccessToken', 'WorkspaceAccessToken'],
     prefix: '',
   },
   {
@@ -48,7 +48,7 @@ export const PLANES: PlaneConfig[] = [
     file: 'workspace',
     className: 'WorkspaceClient',
     specPath: '/api/v1/workspace/openapi.yaml',
-    schemes: ['OrganizationApiKey', 'WorkspaceApiKey'],
+    schemes: ['OrganizationApiKey', 'WorkspaceApiKey', 'WorkspaceAccessToken'],
     prefix: '/workspace',
   },
   {
@@ -309,8 +309,14 @@ class Generator {
         const pathParams = [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!);
         const query = parameters.filter((p) => p.in === 'query');
         const description = typeof op.description === 'string' ? op.description : undefined;
-        const scope = description?.match(/Requires scope `([^`]+)`/)?.[1] ?? null;
-        const dangerMatch = description?.match(/Danger: ([a-z]+)/)?.[1] ?? null;
+        // `x-scope` / `x-danger` are the contract. Routes the spec builder does not generate from
+        // an action carry neither, and only say it in prose — read that as a fallback.
+        const scope = typeof op['x-scope'] === 'string' ? op['x-scope'] : (description?.match(/Requires scope `([^`]+)`/)?.[1] ?? null);
+        const dangerMatch = typeof op['x-danger'] === 'string' ? op['x-danger'] : (description?.match(/Danger: ([a-z]+)/)?.[1] ?? null);
+
+        if (dangerMatch !== null && !DANGERS.has(dangerMatch)) {
+          throw new Error(`${this.#config.file}: ${method} ${path} has an unknown danger ${dangerMatch}`);
+        }
         const responses = isRecord(op.responses) ? op.responses : {};
 
         let inputKind: Operation['inputKind'] = null;

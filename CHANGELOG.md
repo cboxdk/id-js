@@ -20,13 +20,22 @@ in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
   polls the approval and repeats the request with `Cbox-Approval` and the same key.
   `ApprovalDeniedError` and `ApprovalExpiredError` when it is not approved;
   `{ approval: 'return' }` hands back the pending approval with a `resume()`.
-- `CboxIdApiError` (`status`, `error`, `message`, `errors`, `requestId`, `retryAfter`) and
-  `ManagementNetworkError` (with the `idempotencyKey` to repeat safely).
+- `CboxIdApiError` (`status`, `error`, `message`, `errors`, `requestId` from the envelope's
+  `request_id` or `X-Request-Id`, `retryAfter`) and `ManagementNetworkError` (with the
+  `idempotencyKey` to repeat safely).
+- `environment` on `EnvironmentClient`: with a person's root access token and the platform
+  root as `baseUrl`, it sends `Cbox-Environment` so one token can drive any environment of
+  the workspace.
+- Audit Logs helpers: `AuditLogger` (buffers events and sends batches of up to 100, each
+  with its own Idempotency-Key, on size, interval and `flush()`), `exportAuditLogs()`
+  (creates an export and polls it until ready), and `verifyAuditChain()` /
+  `verifyAuditLogChain()` with `canonicalJson()` and `auditEventHash()`, which recompute an
+  organization's hash chain exactly as the server does.
 - `…All` async iterators on every paged list (cursor and page-number paging).
 - DPoP-bound access tokens: `createDPoPSigner()` and `generateDPoPKeyPair()` (ES256 on
   WebCrypto, with `DPoP-Nonce` challenge handling).
 - Operation tables (`environmentOperations`, …) with each action's method, path, scope, danger
-  and whether it can be held for approval.
+  (from the spec's `x-scope` / `x-danger`) and whether it can be held for approval.
 - `npm run generate` regenerates the clients from the vendored specs in `openapi/`, and
   `--fetch <plane>=<host>` refreshes a spec from a running server first. The test suite fails
   when the two disagree.

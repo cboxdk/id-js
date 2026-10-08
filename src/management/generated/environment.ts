@@ -588,6 +588,8 @@ export interface SsoConnection {
   provider?: string | null;
   status: 'draft' | 'active' | 'inactive';
   active: boolean;
+  /** false for a draft created with pending_idp whose identity-provider details are still missing. Activation refuses it. */
+  complete?: boolean;
   /** The settings that are not secrets. */
   config: {
     idp_entity_id?: string;
@@ -597,8 +599,50 @@ export interface SsoConnection {
     issuer?: string;
     client_id?: string;
   };
+  /** What to paste into the identity provider: this connection's own entity id and ACS URL (SAML), or its redirect URI (OIDC). null for a social sign-in connection. */
+  service_provider?: {
+    sp_entity_id?: string;
+    sp_acs_url?: string;
+    redirect_uri?: string;
+  } | null;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+/** A SAML connection's signing certificates. The certificates themselves are never returned. */
+export interface SsoCertificates {
+  connection_id: string;
+  organization_id: string | null;
+  /** When the connection stops working if nothing is done: the latest expiry among the certificates it trusts. */
+  expires_at: string | null;
+  days_remaining: number | null;
+  certificates: Array<{
+    /** primary signs today; staged is trusted beside it until activated. */
+    role: 'primary' | 'staged';
+    /** false for a certificate on file that could not be parsed — still trusted. */
+    readable: boolean;
+    fingerprint_sha256: string | null;
+    subject: string | null;
+    issuer: string | null;
+    not_before: string | null;
+    not_after: string | null;
+    days_remaining: number | null;
+    expired: boolean | null;
+  }>;
+  /** On the stage answer only: what the new certificate was tested for. */
+  checks?: Array<{
+    check: 'readable' | 'not_expired' | 'key_strength' | 'not_on_file' | 'valid_now';
+    passed: boolean;
+  }>;
+}
+
+export interface LogStreamTest {
+  id: string;
+  /** Whether the destination accepted the test entry. */
+  delivered: boolean;
+  /** The destination's refusal, scrubbed of the stream's secret. */
+  error: string | null;
+  tested_at: string;
 }
 
 export interface SsoDomain {
@@ -628,13 +672,120 @@ export interface SamlMetadata {
 export interface PortalLink {
   id: string;
   organization_id: string;
-  covers: 'sso' | 'scim' | 'both';
+  /** What the link may set up. */
+  intents: Array<'sso' | 'dsync' | 'domain_verification' | 'log_streams' | 'certificate_renewal' | 'audit_logs'>;
+  /** The address the link was mailed to, or null when it was not sent. */
+  emailed_to: string | null;
   /**
    * The one-time setup link — the whole credential. Shown once; `null` on an
    * idempotent replay of this answer.
    */
   url: string | null;
   expires_at: string | null;
+}
+
+/**
+ * One audit event your app sent. `hash` covers `id`, `organization_id`, `sequence`,
+ * `action`, `occurred_at`, `actor`, `targets`, `context` and `metadata`, chained to
+ * the organization's previous event by `prev_hash` — see the Audit Logs guide for how
+ * to verify it yourself.
+ */
+export interface AuditLogEvent {
+  id: string;
+  organization_id: string;
+  /** The event's place in its organization's chain, from 1. */
+  sequence: number;
+  /** e.g. `invoice.voided`. */
+  action: string;
+  /** When it happened, as the sender said, to the millisecond. */
+  occurred_at: string;
+  actor: {
+    id: string;
+    type: string;
+    name: string | null;
+    metadata: Record<string, unknown> | null;
+  };
+  targets: Array<{
+    id: string;
+    type: string;
+    name: string | null;
+    metadata: Record<string, unknown> | null;
+  }>;
+  context: {
+    location: string | null;
+    user_agent: string | null;
+  };
+  metadata: Record<string, unknown> | null;
+  /** The version of its action's schema it was checked against; null when the action has none. */
+  schema_version: number | null;
+  /** When it arrived. Retention counts from here. */
+  received_at: string | null;
+  /** The previous event's hash; 64 zeros for an organization's first. */
+  prev_hash: string;
+  hash: string;
+}
+
+export interface AuditLogEventBatch {
+  /** The recorded events, in the order they were sent. */
+  events: AuditLogEvent[];
+}
+
+export interface AuditLogSchema {
+  id: string;
+  action: string;
+  /** Starts at 1; every replacement is the next. */
+  version: number;
+  /** The target types this action's events may name; null allows any. */
+  targets: Array<{
+    type: string;
+    metadata: Record<string, unknown> | null;
+  }> | null;
+  /** A metadata schema (a subset of JSON Schema). */
+  actor_metadata: Record<string, unknown> | null;
+  /** A metadata schema (a subset of JSON Schema). */
+  metadata: Record<string, unknown> | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AuditLogExport {
+  id: string;
+  /** null for an export across the whole environment. */
+  organization_id: string | null;
+  state: 'pending' | 'ready' | 'failed' | 'expired';
+  /** The filters it was asked with. */
+  filters: Record<string, unknown>;
+  row_count: number | null;
+  /**
+   * Where the CSV downloads from once `ready` — signed, and valid for a few minutes;
+   * read the export again for a fresh one. null otherwise, and on an idempotent replay.
+   */
+  url: string | null;
+  created_at: string | null;
+  completed_at: string | null;
+  /** When the file is deleted. */
+  expires_at: string | null;
+}
+
+export interface AuditLogSettings {
+  /** Events are kept this many days after they arrive. */
+  retention_days: number;
+  /** Whether an action with no schema is refused. */
+  strict_schemas: boolean;
+}
+
+export interface AuditLogVerification {
+  organization_id: string;
+  /** Every event checked is unchanged and in place. */
+  valid: boolean;
+  /** The check reached the chain's head. When false, continue from last_sequence + 1. */
+  complete: boolean;
+  verified_count: number;
+  first_sequence: number | null;
+  last_sequence: number | null;
+  head_sequence: number;
+  broken_at_sequence: number | null;
+  reason: 'missing' | 'link' | 'hash' | 'truncated' | null;
 }
 
 /** A directory syncing an organization's people in. Its token and credentials are never returned after they are minted. */
@@ -780,6 +931,8 @@ export interface ErrorSchema {
   error: string;
   /** Human-readable explanation */
   message: string;
+  /** The id this request was served under, also sent as the X-Request-Id header. Quote it when reporting a problem. */
+  request_id?: string;
   /**
    * Present on `validation_failed` only: the offending request fields, each
    * mapped to its messages.
@@ -1160,6 +1313,200 @@ export interface AppsUpdateBody {
 /** Response body of `apps.update`. */
 export type AppsUpdateResponse = {
   data: App;
+};
+
+/** Request body of `audit_logs.events.create`. */
+export interface AuditLogsEventsCreateBody {
+  /** 1–100 events, recorded all together or not at all. */
+  events: Array<{
+    /** The organization (your customer) the event happened in. */
+    organization_id: string;
+    /** What happened, as dotted words: `invoice.voided`, `user.signed_in`. */
+    action: string;
+    /** When it happened: ISO 8601 with a time zone, to the millisecond. */
+    occurred_at: string;
+    actor: {
+      /** Your id for whoever did it. */
+      id: string;
+      /** What kind of actor: `user`, `api_key`, `system`. */
+      type: string;
+      /** A name a person reads in the log. */
+      name?: string | null;
+      /** Up to 50 names to strings, numbers, booleans or null. */
+      metadata?: Record<string, unknown>;
+    };
+    /** What it was done to. */
+    targets?: Array<{
+      id: string;
+      /** What kind of thing: `invoice`, `user`, `report`. */
+      type: string;
+      name?: string | null;
+      metadata?: Record<string, unknown>;
+    }>;
+    context?: {
+      /** Where it came from — usually the client's IP address. */
+      location?: string | null;
+      user_agent?: string | null;
+    };
+    /** Up to 50 names to strings, numbers, booleans or null; values up to 500 characters. */
+    metadata?: Record<string, unknown>;
+  }>;
+}
+
+/** Response body of `audit_logs.events.create`. */
+export type AuditLogsEventsCreateResponse = {
+  data: AuditLogEventBatch;
+};
+
+/** Query parameters of `audit_logs.events.list`. */
+export interface AuditLogsEventsListQuery {
+  /** Only this organization's events. Required in effect for an organization's own administrator, whose events are the only ones they see. */
+  organization_id?: string;
+  /** Only these actions, e.g. `invoice.voided`. */
+  actions?: string[];
+  /** Only events this actor caused. */
+  actor_id?: string;
+  /** Only events naming this target. */
+  target_id?: string;
+  /** Only events that occurred at or after this time. */
+  range_start?: string;
+  /** Only events that occurred before this time. */
+  range_end?: string;
+  /** `desc` (default) for newest first, `asc` for oldest first. */
+  order?: 'desc' | 'asc';
+  /** Events per page, 1–100. Default 50. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `audit_logs.events.list`. */
+export type AuditLogsEventsListResponse = {
+  data: AuditLogEvent[];
+  meta: PageMeta;
+};
+
+/** Request body of `audit_logs.exports.create`. */
+export interface AuditLogsExportsCreateBody {
+  /** Only this organization's events. Required in effect for an organization's own administrator, whose events are the only ones they see. */
+  organization_id?: string;
+  /** Only these actions, e.g. `invoice.voided`. */
+  actions?: string[];
+  /** Only events this actor caused. */
+  actor_id?: string;
+  /** Only events naming this target. */
+  target_id?: string;
+  /** Only events that occurred at or after this time. */
+  range_start?: string;
+  /** Only events that occurred before this time. */
+  range_end?: string;
+}
+
+/** Response body of `audit_logs.exports.create`. */
+export type AuditLogsExportsCreateResponse = {
+  data: AuditLogExport;
+};
+
+/** Response body of `audit_logs.exports.get`. */
+export type AuditLogsExportsGetResponse = {
+  data: AuditLogExport;
+};
+
+/** Request body of `audit_logs.schemas.create`. */
+export interface AuditLogsSchemasCreateBody {
+  /** The action this schema is for, e.g. `invoice.voided`. */
+  action: string;
+  /** The target types this action's events may name, each with an optional metadata schema. Leave out to allow any. */
+  targets?: Array<{
+    /** A target type events of this action may name. */
+    type: string;
+    /** A metadata schema for targets of this type. */
+    metadata?: Record<string, unknown>;
+  }> | null;
+  /** A metadata schema (a subset of JSON Schema) for the actor's metadata. */
+  actor_metadata?: Record<string, unknown>;
+  /** A metadata schema (a subset of JSON Schema) for the event's own metadata. */
+  metadata?: Record<string, unknown>;
+}
+
+/** Response body of `audit_logs.schemas.create`. */
+export type AuditLogsSchemasCreateResponse = {
+  data: AuditLogSchema;
+};
+
+/** Response body of `audit_logs.schemas.delete`. */
+export type AuditLogsSchemasDeleteResponse = void;
+
+/** Response body of `audit_logs.schemas.get`. */
+export type AuditLogsSchemasGetResponse = {
+  data: AuditLogSchema;
+};
+
+/** Query parameters of `audit_logs.schemas.list`. */
+export interface AuditLogsSchemasListQuery {
+  /** Items per page, 1–100. Default 50. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `audit_logs.schemas.list`. */
+export type AuditLogsSchemasListResponse = {
+  data: AuditLogSchema[];
+  meta: PageMeta;
+};
+
+/** Request body of `audit_logs.schemas.update`. */
+export interface AuditLogsSchemasUpdateBody {
+  /** The target types this action's events may name, each with an optional metadata schema. Leave out to allow any. */
+  targets?: Array<{
+    /** A target type events of this action may name. */
+    type: string;
+    /** A metadata schema for targets of this type. */
+    metadata?: Record<string, unknown>;
+  }> | null;
+  /** A metadata schema (a subset of JSON Schema) for the actor's metadata. */
+  actor_metadata?: Record<string, unknown>;
+  /** A metadata schema (a subset of JSON Schema) for the event's own metadata. */
+  metadata?: Record<string, unknown>;
+}
+
+/** Response body of `audit_logs.schemas.update`. */
+export type AuditLogsSchemasUpdateResponse = {
+  data: AuditLogSchema;
+};
+
+/** Response body of `audit_logs.settings.get`. */
+export type AuditLogsSettingsGetResponse = {
+  data: AuditLogSettings;
+};
+
+/** Request body of `audit_logs.settings.update`. */
+export interface AuditLogsSettingsUpdateBody {
+  /** Keep events this many days after they arrive. */
+  retention_days?: number;
+  /** Refuse events whose action has no schema. */
+  strict_schemas?: boolean;
+}
+
+/** Response body of `audit_logs.settings.update`. */
+export type AuditLogsSettingsUpdateResponse = {
+  data: AuditLogSettings;
+};
+
+/** Query parameters of `audit_logs.verify`. */
+export interface AuditLogsVerifyQuery {
+  /** The organization whose chain to verify. An organization's own administrator may leave it out. */
+  organization_id?: string;
+  /** Start here rather than at the oldest event kept. */
+  from_sequence?: number;
+  /** Verify at most this many events. Default 10,000. */
+  limit?: number;
+}
+
+/** Response body of `audit_logs.verify`. */
+export type AuditLogsVerifyResponse = {
+  data: AuditLogVerification;
 };
 
 /** Query parameters of `audit.list`. */
@@ -1701,6 +2048,11 @@ export type LogStreamsListResponse = {
   meta: PageMeta;
 };
 
+/** Response body of `log_streams.test`. */
+export type LogStreamsTestResponse = {
+  data: LogStreamTest;
+};
+
 /** Request body of `log_streams.update`. */
 export interface LogStreamsUpdateBody {
   /** True to deliver; false to stop, keeping what is pending. */
@@ -1873,8 +2225,14 @@ export type OrganizationsListResponse = {
 
 /** Request body of `organizations.portal_links.create`. */
 export interface OrganizationsPortalLinksCreateBody {
-  /** What the link may configure: sso (connection and email domains), scim (directory sync), or both. */
-  covers: 'sso' | 'scim' | 'both';
+  /** What the link may set up: sso (connection and email domains), dsync (directory sync over SCIM), domain_verification, log_streams, certificate_renewal (a SAML connection's signing certificate), audit_logs (the organization's audit events, read-only, with CSV export). */
+  intents: Array<'sso' | 'dsync' | 'domain_verification' | 'log_streams' | 'certificate_renewal' | 'audit_logs'>;
+  /** How long the link may wait to be opened, in minutes — 5 to 10080 (a week). Left out, the deployment's default (30). */
+  expires_in_minutes?: number | null;
+  /** Mail the link to this address — the customer's IT contact. Left out, nothing is sent. */
+  email?: string | null;
+  /** The language of that mail. Left out, the environment's default language. */
+  locale?: 'en' | 'da' | 'de' | 'sv' | 'nb' | 'fr' | null;
 }
 
 /** Response body of `organizations.portal_links.create`. */
@@ -2378,6 +2736,45 @@ export type SsoConnectionsActivateResponse = {
   data: SsoConnection;
 };
 
+/** Request body of `sso.connections.certificates.activate`. */
+export interface SsoConnectionsCertificatesActivateBody {
+  /** Only if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+  /** The staged certificate's SHA-256 fingerprint, as the certificate list gives it. */
+  fingerprint_sha256: string;
+}
+
+/** Response body of `sso.connections.certificates.activate`. */
+export type SsoConnectionsCertificatesActivateResponse = {
+  data: SsoCertificates;
+};
+
+/** Query parameters of `sso.connections.certificates.list`. */
+export interface SsoConnectionsCertificatesListQuery {
+  /** Only if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+}
+
+/** Response body of `sso.connections.certificates.list`. */
+export type SsoConnectionsCertificatesListResponse = {
+  data: SsoCertificates;
+};
+
+/** Request body of `sso.connections.certificates.stage`. */
+export interface SsoConnectionsCertificatesStageBody {
+  /** Only if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+  /** The new signing certificate, PEM. Send this or metadata. */
+  certificate?: string | null;
+  /** The identity provider's metadata XML, or the https URL it is published at. Send this or certificate. */
+  metadata?: string | null;
+}
+
+/** Response body of `sso.connections.certificates.stage`. */
+export type SsoConnectionsCertificatesStageResponse = {
+  data: SsoCertificates;
+};
+
 /** Request body of `sso.connections.create`. */
 export interface SsoConnectionsCreateBody {
   /** The organization the connection belongs to. Send this or environment_wide. */
@@ -2386,17 +2783,19 @@ export interface SsoConnectionsCreateBody {
   environment_wide?: boolean;
   /** What administrators call it: "Okta", "Entra ID". */
   name: string;
-  /** saml or oidc. The config fields of that type are required. */
+  /** saml or oidc. The config fields of that type are required, unless pending_idp. */
   type: 'saml' | 'oidc';
+  /** True to create the draft before the identity provider's details are known: the answer's service_provider is what to paste into it. Complete it with update before activating. */
+  pending_idp?: boolean;
   /** SAML: the identity provider's entity id. */
   idp_entity_id?: string | null;
   /** SAML: the identity provider's single sign-on URL. */
   idp_sso_url?: string | null;
   /** SAML: the identity provider's signing certificate (PEM). Write-only. */
   idp_x509cert?: string | null;
-  /** SAML: the entity id this environment presents as the service provider. */
+  /** SAML: the entity id this environment presents as the service provider. Left out on create, this connection's own. */
   sp_entity_id?: string | null;
-  /** SAML: where the identity provider posts its assertions. */
+  /** SAML: where the identity provider posts its assertions. Left out on create, this connection's own ACS URL. */
   sp_acs_url?: string | null;
   /** OIDC: the provider's issuer URL; its endpoints are discovered from it. */
   issuer?: string | null;
@@ -2483,9 +2882,9 @@ export interface SsoConnectionsUpdateBody {
   idp_sso_url?: string | null;
   /** SAML: the identity provider's signing certificate (PEM). Write-only. */
   idp_x509cert?: string | null;
-  /** SAML: the entity id this environment presents as the service provider. */
+  /** SAML: the entity id this environment presents as the service provider. Left out on create, this connection's own. */
   sp_entity_id?: string | null;
-  /** SAML: where the identity provider posts its assertions. */
+  /** SAML: where the identity provider posts its assertions. Left out on create, this connection's own ACS URL. */
   sp_acs_url?: string | null;
   /** OIDC: the provider's issuer URL; its endpoints are discovered from it. */
   issuer?: string | null;
@@ -2843,7 +3242,7 @@ export interface WebhooksCreateBody {
   /** A public HTTPS URL. Signed deliveries are POSTed here. */
   url: string;
   /** The events it receives. */
-  event_types: Array<'user.created' | 'user.updated' | 'user.deactivated' | 'user.login' | 'user.reactivated' | 'identity.linked' | 'user.erased' | 'organization.created' | 'organization.suspended' | 'organization.reactivated' | 'organization.updated' | 'organization.deleted' | 'membership.created' | 'membership.updated' | 'membership.deleted' | 'invitation.created' | 'invitation.accepted' | 'invitation.revoked' | 'role.assigned' | 'role.unassigned' | 'role.assigned_everywhere' | 'role.unassigned_everywhere' | 'api_key.created' | 'api_key.revoked' | 'support_session.started' | 'directory.user.provisioned' | 'directory.user.deprovisioned' | 'directory.user.deactivated' | 'directory.group.membership_changed' | 'domain.added' | 'domain.removed' | 'domain.verified' | 'connection.activated' | 'entitlement.set' | 'entitlement.updated' | 'entitlement.revoked' | 'vault.grant.created' | 'vault.grant.revoked' | 'vault.secret.revoked' | 'governance.access.revoked'>;
+  event_types: Array<'user.created' | 'user.updated' | 'user.deactivated' | 'user.login' | 'user.reactivated' | 'identity.linked' | 'user.erased' | 'organization.created' | 'organization.suspended' | 'organization.reactivated' | 'organization.updated' | 'organization.deleted' | 'membership.created' | 'membership.updated' | 'membership.deleted' | 'invitation.created' | 'invitation.accepted' | 'invitation.revoked' | 'role.assigned' | 'role.unassigned' | 'role.assigned_everywhere' | 'role.unassigned_everywhere' | 'api_key.created' | 'api_key.revoked' | 'support_session.started' | 'directory.user.provisioned' | 'directory.user.deprovisioned' | 'directory.user.deactivated' | 'directory.group.membership_changed' | 'domain.added' | 'domain.removed' | 'domain.verified' | 'connection.activated' | 'connection.certificate_expiring' | 'entitlement.set' | 'entitlement.updated' | 'entitlement.revoked' | 'vault.grant.created' | 'vault.grant.revoked' | 'vault.secret.revoked' | 'governance.access.revoked'>;
   /** The organization it belongs to; it carries that organization's traffic only. Send this or environment_wide. */
   organization_id?: string | null;
   /** True to make it the environment's own, carrying EVERY organization's traffic. Send this or organization_id. */
@@ -2944,6 +3343,18 @@ export const environmentOperations = {
   'apps.settings.token_exchange': { action: 'apps.settings.token_exchange', operationId: 'apps_settings_token_exchange', method: 'PUT', path: '/apps/{id}/settings/token-exchange', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
   'apps.settings.token_lifetime': { action: 'apps.settings.token_lifetime', operationId: 'apps_settings_token_lifetime', method: 'PUT', path: '/apps/{id}/settings/token-lifetime', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
   'apps.update': { action: 'apps.update', operationId: 'apps_update', method: 'PATCH', path: '/apps/{id}', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
+  'audit_logs.events.create': { action: 'audit_logs.events.create', operationId: 'audit_logs_events_create', method: 'POST', path: '/audit-logs/events', pathParams: [], scope: 'audit_logs:write', danger: 'write', approval: true, body: true, pagination: null },
+  'audit_logs.events.list': { action: 'audit_logs.events.list', operationId: 'audit_logs_events_list', method: 'GET', path: '/audit-logs/events', pathParams: [], scope: 'audit_logs:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'audit_logs.exports.create': { action: 'audit_logs.exports.create', operationId: 'audit_logs_exports_create', method: 'POST', path: '/audit-logs/exports', pathParams: [], scope: 'audit_logs:export', danger: 'write', approval: true, body: true, pagination: null },
+  'audit_logs.exports.get': { action: 'audit_logs.exports.get', operationId: 'audit_logs_exports_get', method: 'GET', path: '/audit-logs/exports/{id}', pathParams: ['id'], scope: 'audit_logs:read', danger: 'read', approval: true, body: false, pagination: null },
+  'audit_logs.schemas.create': { action: 'audit_logs.schemas.create', operationId: 'audit_logs_schemas_create', method: 'POST', path: '/audit-logs/schemas', pathParams: [], scope: 'audit_logs:manage', danger: 'write', approval: true, body: true, pagination: null },
+  'audit_logs.schemas.delete': { action: 'audit_logs.schemas.delete', operationId: 'audit_logs_schemas_delete', method: 'DELETE', path: '/audit-logs/schemas/{action}', pathParams: ['action'], scope: 'audit_logs:manage', danger: 'destructive', approval: true, body: false, pagination: null },
+  'audit_logs.schemas.get': { action: 'audit_logs.schemas.get', operationId: 'audit_logs_schemas_get', method: 'GET', path: '/audit-logs/schemas/{action}', pathParams: ['action'], scope: 'audit_logs:read', danger: 'read', approval: true, body: false, pagination: null },
+  'audit_logs.schemas.list': { action: 'audit_logs.schemas.list', operationId: 'audit_logs_schemas_list', method: 'GET', path: '/audit-logs/schemas', pathParams: [], scope: 'audit_logs:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'audit_logs.schemas.update': { action: 'audit_logs.schemas.update', operationId: 'audit_logs_schemas_update', method: 'PUT', path: '/audit-logs/schemas/{action}', pathParams: ['action'], scope: 'audit_logs:manage', danger: 'write', approval: true, body: true, pagination: null },
+  'audit_logs.settings.get': { action: 'audit_logs.settings.get', operationId: 'audit_logs_settings_get', method: 'GET', path: '/audit-logs/settings', pathParams: [], scope: 'audit_logs:read', danger: 'read', approval: true, body: false, pagination: null },
+  'audit_logs.settings.update': { action: 'audit_logs.settings.update', operationId: 'audit_logs_settings_update', method: 'PATCH', path: '/audit-logs/settings', pathParams: [], scope: 'audit_logs:manage', danger: 'destructive', approval: true, body: true, pagination: null },
+  'audit_logs.verify': { action: 'audit_logs.verify', operationId: 'audit_logs_verify', method: 'GET', path: '/audit-logs/verify', pathParams: [], scope: 'audit_logs:read', danger: 'read', approval: true, body: false, pagination: null },
   'audit.list': { action: 'audit.list', operationId: 'audit_list', method: 'GET', path: '/audit-log', pathParams: [], scope: 'audit:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'branding.appearance.get': { action: 'branding.appearance.get', operationId: 'branding_appearance_get', method: 'GET', path: '/branding/appearance', pathParams: [], scope: 'branding:read', danger: 'read', approval: true, body: false, pagination: null },
   'branding.appearance.set': { action: 'branding.appearance.set', operationId: 'branding_appearance_set', method: 'PUT', path: '/branding/appearance', pathParams: [], scope: 'branding:write', danger: 'write', approval: true, body: true, pagination: null },
@@ -2989,6 +3400,7 @@ export const environmentOperations = {
   'log_streams.delete': { action: 'log_streams.delete', operationId: 'log_streams_delete', method: 'DELETE', path: '/log-streams/{id}', pathParams: ['id'], scope: 'log_streams:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'log_streams.get': { action: 'log_streams.get', operationId: 'log_streams_get', method: 'GET', path: '/log-streams/{id}', pathParams: ['id'], scope: 'log_streams:read', danger: 'read', approval: true, body: false, pagination: null },
   'log_streams.list': { action: 'log_streams.list', operationId: 'log_streams_list', method: 'GET', path: '/log-streams', pathParams: [], scope: 'log_streams:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'log_streams.test': { action: 'log_streams.test', operationId: 'log_streams_test', method: 'POST', path: '/log-streams/{id}/test', pathParams: ['id'], scope: 'log_streams:write', danger: 'write', approval: true, body: false, pagination: null },
   'log_streams.update': { action: 'log_streams.update', operationId: 'log_streams_update', method: 'PATCH', path: '/log-streams/{id}', pathParams: ['id'], scope: 'log_streams:write', danger: 'critical', approval: true, body: true, pagination: null },
   'members.add': { action: 'members.add', operationId: 'members_add', method: 'POST', path: '/organizations/{organization_id}/members', pathParams: ['organization_id'], scope: 'members:write', danger: null, approval: true, body: true, pagination: null },
   'members.list': { action: 'members.list', operationId: 'members_list', method: 'GET', path: '/organizations/{organization_id}/members', pathParams: ['organization_id'], scope: 'members:read', danger: null, approval: true, body: false, pagination: 'cursor' },
@@ -3045,6 +3457,9 @@ export const environmentOperations = {
   'sod_policies.list': { action: 'sod_policies.list', operationId: 'sod_policies_list', method: 'GET', path: '/sod-policies', pathParams: [], scope: 'governance:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'sod_policies.status.set': { action: 'sod_policies.status.set', operationId: 'sod_policies_status_set', method: 'POST', path: '/sod-policies/{id}/status', pathParams: ['id'], scope: 'governance:write', danger: 'critical', approval: true, body: true, pagination: null },
   'sso.connections.activate': { action: 'sso.connections.activate', operationId: 'sso_connections_activate', method: 'POST', path: '/sso/connections/{id}/activate', pathParams: ['id'], scope: 'sso:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'sso.connections.certificates.activate': { action: 'sso.connections.certificates.activate', operationId: 'sso_connections_certificates_activate', method: 'POST', path: '/sso/connections/{id}/certificates/activate', pathParams: ['id'], scope: 'sso:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'sso.connections.certificates.list': { action: 'sso.connections.certificates.list', operationId: 'sso_connections_certificates_list', method: 'GET', path: '/sso/connections/{id}/certificates', pathParams: ['id'], scope: 'sso:read', danger: 'read', approval: true, body: false, pagination: null },
+  'sso.connections.certificates.stage': { action: 'sso.connections.certificates.stage', operationId: 'sso_connections_certificates_stage', method: 'POST', path: '/sso/connections/{id}/certificates', pathParams: ['id'], scope: 'sso:write', danger: 'critical', approval: true, body: true, pagination: null },
   'sso.connections.create': { action: 'sso.connections.create', operationId: 'sso_connections_create', method: 'POST', path: '/sso/connections', pathParams: [], scope: 'sso:write', danger: 'write', approval: true, body: true, pagination: null },
   'sso.connections.delete': { action: 'sso.connections.delete', operationId: 'sso_connections_delete', method: 'DELETE', path: '/sso/connections/{id}', pathParams: ['id'], scope: 'sso:write', danger: 'critical', approval: true, body: true, pagination: null },
   'sso.connections.disable': { action: 'sso.connections.disable', operationId: 'sso_connections_disable', method: 'POST', path: '/sso/connections/{id}/disable', pathParams: ['id'], scope: 'sso:write', danger: 'critical', approval: true, body: true, pagination: null },
@@ -3608,6 +4023,167 @@ export class EnvironmentClient {
        */
       tokenLifetime: <O extends CallOptions = CallOptions>(id: string, body?: AppsSettingsTokenLifetimeBody, options?: O): Promise<Outcome<AppsSettingsTokenLifetimeResponse, O>> =>
         this.transport.call<AppsSettingsTokenLifetimeResponse, O>(environmentOperations['apps.settings.token_lifetime'], [id], body, options),
+    },
+  };
+
+  readonly auditLogs = {
+    /**
+     * Re-hash one organization's audit-event chain (from the oldest event retention kept, or from_sequence) and report whether every event is unchanged and in place.
+     *
+     * Requires scope `audit_logs:read`. Danger: read.
+     *
+     * `GET /audit-logs/verify` · action `audit_logs.verify`
+     * @scope `audit_logs:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    verify: <O extends CallOptions = CallOptions>(query?: AuditLogsVerifyQuery, options?: O): Promise<Outcome<AuditLogsVerifyResponse, O>> =>
+      this.transport.call<AuditLogsVerifyResponse, O>(environmentOperations['audit_logs.verify'], [], query, options),
+    events: {
+      /**
+       * Record 1–100 audit events your app's users caused, each for one of your organizations (customers); checked against the action's schema when it has one and appended to that organization's tamper-evident chain. Send an Idempotency-Key.
+       *
+       * Requires scope `audit_logs:write`. Danger: write.
+       *
+       * `POST /audit-logs/events` · action `audit_logs.events.create`
+       * @scope `audit_logs:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      create: <O extends CallOptions = CallOptions>(body: AuditLogsEventsCreateBody, options?: O): Promise<Outcome<AuditLogsEventsCreateResponse, O>> =>
+        this.transport.call<AuditLogsEventsCreateResponse, O>(environmentOperations['audit_logs.events.create'], [], body, options),
+      /**
+       * Read audit events newest first, for one organization or the whole environment, filtered by action, actor, target and time range; pass `next_cursor` as `after` to page.
+       *
+       * Requires scope `audit_logs:read`. Danger: read.
+       *
+       * `GET /audit-logs/events` · action `audit_logs.events.list`
+       * @scope `audit_logs:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(query?: AuditLogsEventsListQuery, options?: O): Promise<Outcome<AuditLogsEventsListResponse, O>> =>
+        this.transport.call<AuditLogsEventsListResponse, O>(environmentOperations['audit_logs.events.list'], [], query, options),
+      /** Every item of `audit_logs.events.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<AuditLogsEventsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<AuditLogEvent, void, undefined> =>
+        this.transport.paginate(environmentOperations['audit_logs.events.list'], [], query as Record<string, unknown> | undefined, options),
+    },
+    exports: {
+      /**
+       * Start a CSV export of audit events (same filters as the list). It is written on the queue: poll audit_logs.exports.get until state is ready, then download from its short-lived url.
+       *
+       * Requires scope `audit_logs:export`. Danger: write.
+       *
+       * `POST /audit-logs/exports` · action `audit_logs.exports.create`
+       * @scope `audit_logs:export`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      create: <O extends CallOptions = CallOptions>(body?: AuditLogsExportsCreateBody, options?: O): Promise<Outcome<AuditLogsExportsCreateResponse, O>> =>
+        this.transport.call<AuditLogsExportsCreateResponse, O>(environmentOperations['audit_logs.exports.create'], [], body, options),
+      /**
+       * Read an audit-log export's state; once ready it carries a signed download url valid for a few minutes (read it again for a fresh one).
+       *
+       * Requires scope `audit_logs:read`. Danger: read.
+       *
+       * `GET /audit-logs/exports/{id}` · action `audit_logs.exports.get`
+       * @scope `audit_logs:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<AuditLogsExportsGetResponse, O>> =>
+        this.transport.call<AuditLogsExportsGetResponse, O>(environmentOperations['audit_logs.exports.get'], [id], undefined, options),
+    },
+    schemas: {
+      /**
+       * Define the schema one audit-log action's events must match — allowed target types and metadata schemas (a subset of JSON Schema). Events of that action are then validated on arrival.
+       *
+       * Requires scope `audit_logs:manage`. Danger: write.
+       *
+       * `POST /audit-logs/schemas` · action `audit_logs.schemas.create`
+       * @scope `audit_logs:manage`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      create: <O extends CallOptions = CallOptions>(body: AuditLogsSchemasCreateBody, options?: O): Promise<Outcome<AuditLogsSchemasCreateResponse, O>> =>
+        this.transport.call<AuditLogsSchemasCreateResponse, O>(environmentOperations['audit_logs.schemas.create'], [], body, options),
+      /**
+       * Delete an audit-log action's schema. Its events are then accepted unchecked — or refused, if the environment is in strict mode.
+       *
+       * Requires scope `audit_logs:manage`. Danger: destructive.
+       *
+       * `DELETE /audit-logs/schemas/{action}` · action `audit_logs.schemas.delete`
+       * @scope `audit_logs:manage`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      delete: <O extends CallOptions = CallOptions>(action: string, options?: O): Promise<Outcome<AuditLogsSchemasDeleteResponse, O>> =>
+        this.transport.call<AuditLogsSchemasDeleteResponse, O>(environmentOperations['audit_logs.schemas.delete'], [action], undefined, options),
+      /**
+       * Read the schema one audit-log action's events are validated against.
+       *
+       * Requires scope `audit_logs:read`. Danger: read.
+       *
+       * `GET /audit-logs/schemas/{action}` · action `audit_logs.schemas.get`
+       * @scope `audit_logs:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      get: <O extends CallOptions = CallOptions>(action: string, options?: O): Promise<Outcome<AuditLogsSchemasGetResponse, O>> =>
+        this.transport.call<AuditLogsSchemasGetResponse, O>(environmentOperations['audit_logs.schemas.get'], [action], undefined, options),
+      /**
+       * List the audit-log schemas this environment validates events against, one per action.
+       *
+       * Requires scope `audit_logs:read`. Danger: read.
+       *
+       * `GET /audit-logs/schemas` · action `audit_logs.schemas.list`
+       * @scope `audit_logs:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(query?: AuditLogsSchemasListQuery, options?: O): Promise<Outcome<AuditLogsSchemasListResponse, O>> =>
+        this.transport.call<AuditLogsSchemasListResponse, O>(environmentOperations['audit_logs.schemas.list'], [], query, options),
+      /** Every item of `audit_logs.schemas.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<AuditLogsSchemasListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<AuditLogSchema, void, undefined> =>
+        this.transport.paginate(environmentOperations['audit_logs.schemas.list'], [], query as Record<string, unknown> | undefined, options),
+      /**
+       * Replace an audit-log action's schema with a new version (omitted parts are removed). Recorded events keep the version they were checked against.
+       *
+       * Requires scope `audit_logs:manage`. Danger: write.
+       *
+       * `PUT /audit-logs/schemas/{action}` · action `audit_logs.schemas.update`
+       * @scope `audit_logs:manage`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(action: string, body?: AuditLogsSchemasUpdateBody, options?: O): Promise<Outcome<AuditLogsSchemasUpdateResponse, O>> =>
+        this.transport.call<AuditLogsSchemasUpdateResponse, O>(environmentOperations['audit_logs.schemas.update'], [action], body, options),
+    },
+    settings: {
+      /**
+       * Read this environment's audit-log settings: retention in days and whether strict schemas are on.
+       *
+       * Requires scope `audit_logs:read`. Danger: read.
+       *
+       * `GET /audit-logs/settings` · action `audit_logs.settings.get`
+       * @scope `audit_logs:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      get: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<AuditLogsSettingsGetResponse, O>> =>
+        this.transport.call<AuditLogsSettingsGetResponse, O>(environmentOperations['audit_logs.settings.get'], [], undefined, options),
+      /**
+       * Change this environment's audit-log retention (days, 1–3650) and strict mode. Shortening retention deletes older events at the next daily prune — irreversibly.
+       *
+       * Requires scope `audit_logs:manage`. Danger: destructive.
+       *
+       * `PATCH /audit-logs/settings` · action `audit_logs.settings.update`
+       * @scope `audit_logs:manage`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(body?: AuditLogsSettingsUpdateBody, options?: O): Promise<Outcome<AuditLogsSettingsUpdateResponse, O>> =>
+        this.transport.call<AuditLogsSettingsUpdateResponse, O>(environmentOperations['audit_logs.settings.update'], [], body, options),
     },
   };
 
@@ -4241,6 +4817,18 @@ export class EnvironmentClient {
     listAll: (query?: Omit<LogStreamsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<LogStream, void, undefined> =>
       this.transport.paginate(environmentOperations['log_streams.list'], [], query as Record<string, unknown> | undefined, options),
     /**
+     * Send one test entry to a log stream now and report whether the SIEM accepted it.
+     *
+     * Requires scope `log_streams:write`. Danger: write.
+     *
+     * `POST /log-streams/{id}/test` · action `log_streams.test`
+     * @scope `log_streams:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    test: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<LogStreamsTestResponse, O>> =>
+      this.transport.call<LogStreamsTestResponse, O>(environmentOperations['log_streams.test'], [id], undefined, options),
+    /**
      * Disable (enabled: false) or resume (enabled: true) an audit log stream. Disabled, entries are kept and delivered on resume.
      *
      * Requires scope `log_streams:write`. Danger: critical.
@@ -4541,7 +5129,7 @@ export class EnvironmentClient {
     },
     portalLinks: {
       /**
-       * Create a one-time Admin Portal link an organization's IT administrator uses to set up its SSO and domains, or its directory sync, without an account. The URL is shown once.
+       * Create a one-time Admin Portal link an organization's IT administrator uses to set up SSO, directory sync, domain verification, log streams or SAML certificate renewal, or to read its audit logs, without an account. The URL is shown once.
        *
        * Requires scope `portal_links:write`. Danger: critical.
        *
@@ -5100,6 +5688,44 @@ export class EnvironmentClient {
        */
       update: <O extends CallOptions = CallOptions>(id: string, body?: SsoConnectionsUpdateBody, options?: O): Promise<Outcome<SsoConnectionsUpdateResponse, O>> =>
         this.transport.call<SsoConnectionsUpdateResponse, O>(environmentOperations['sso.connections.update'], [id], body, options),
+      certificates: {
+        /**
+         * Make a staged SAML signing certificate the connection's primary. The certificate it replaces stops being trusted.
+         *
+         * Requires scope `sso:write`. Danger: critical.
+         *
+         * `POST /sso/connections/{id}/certificates/activate` · action `sso.connections.certificates.activate`
+         * @scope `sso:write`
+         * @danger critical
+         * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+         */
+        activate: <O extends CallOptions = CallOptions>(id: string, body: SsoConnectionsCertificatesActivateBody, options?: O): Promise<Outcome<SsoConnectionsCertificatesActivateResponse, O>> =>
+          this.transport.call<SsoConnectionsCertificatesActivateResponse, O>(environmentOperations['sso.connections.certificates.activate'], [id], body, options),
+        /**
+         * List a SAML connection's signing certificates — primary and staged — with each one's fingerprint and expiry.
+         *
+         * Requires scope `sso:read`. Danger: read.
+         *
+         * `GET /sso/connections/{id}/certificates` · action `sso.connections.certificates.list`
+         * @scope `sso:read`
+         * @danger read
+         * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+         */
+        list: <O extends CallOptions = CallOptions>(id: string, query?: SsoConnectionsCertificatesListQuery, options?: O): Promise<Outcome<SsoConnectionsCertificatesListResponse, O>> =>
+          this.transport.call<SsoConnectionsCertificatesListResponse, O>(environmentOperations['sso.connections.certificates.list'], [id], query, options),
+        /**
+         * Stage a SAML connection's new IdP signing certificate (PEM or IdP metadata) beside the current one, so a renewal has no outage. Activate it once the IdP signs with it.
+         *
+         * Requires scope `sso:write`. Danger: critical.
+         *
+         * `POST /sso/connections/{id}/certificates` · action `sso.connections.certificates.stage`
+         * @scope `sso:write`
+         * @danger critical
+         * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+         */
+        stage: <O extends CallOptions = CallOptions>(id: string, body?: SsoConnectionsCertificatesStageBody, options?: O): Promise<Outcome<SsoConnectionsCertificatesStageResponse, O>> =>
+          this.transport.call<SsoConnectionsCertificatesStageResponse, O>(environmentOperations['sso.connections.certificates.stage'], [id], body, options),
+      },
     },
     domains: {
       /**

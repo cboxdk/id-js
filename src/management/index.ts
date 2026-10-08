@@ -36,6 +36,27 @@ export {
 } from './errors.js';
 export { CboxIdError, ConfigurationError } from '../errors.js';
 export { createDPoPSigner, generateDPoPKeyPair } from './dpop.js';
+export {
+  AuditLogger,
+  AuditLogExportError,
+  exportAuditLogs,
+  verifyAuditChain,
+  verifyAuditLogChain,
+  canonicalJson,
+  auditEventDocument,
+  auditEventHash,
+  AUDIT_CHAIN_GENESIS,
+  MAX_AUDIT_BATCH,
+} from './audit-logs.js';
+export type {
+  AuditLogEventInput,
+  AuditLogRecord,
+  AuditLoggerOptions,
+  AuditLogExportOptions,
+  AuditEventHashInput,
+  AuditChainVerification,
+  VerifyAuditChainOptions,
+} from './audit-logs.js';
 export type { DPoPSigner } from './dpop.js';
 export type {
   ApiResponse,

@@ -67,6 +67,8 @@ export interface ErrorSchema {
   error: string;
   /** Human-readable explanation */
   message: string;
+  /** The id this request was served under, also sent as the X-Request-Id header. Quote it when reporting a problem. */
+  request_id?: string;
   /** Present on `validation_failed` only — the offending fields, each mapped to its messages. */
   errors?: {
     [key: string]: string[];
@@ -74,6 +76,14 @@ export interface ErrorSchema {
 }
 
 // ── Operation inputs and responses ─────────────────────────────────────────────────────────
+
+/** Response body of `action_approvals.get`. */
+export type ActionApprovalsGetResponse = {
+  data: {
+    id: string;
+    status: 'pending' | 'approved' | 'denied' | 'expired' | 'consumed';
+  };
+};
 
 /** Request body of `environments.create`. */
 export interface EnvironmentsCreateBody {
@@ -188,6 +198,7 @@ export type WorkspacesSetStatusResponse = {
 
 /** Every operation of the Cbox ID — Operator API — method, path, scope and danger — keyed by action name. */
 export const platformOperations = {
+  'action_approvals.get': { action: null, operationId: null, method: 'GET', path: '/platform/action-approvals/{id}', pathParams: ['id'], scope: null, danger: null, approval: false, body: false, pagination: null },
   'platform.environments.create': { action: 'platform.environments.create', operationId: 'platform_environments_create', method: 'POST', path: '/platform/environments', pathParams: [], scope: 'operator:environments:write', danger: 'critical', approval: true, body: true, pagination: null },
   'platform.environments.provision': { action: 'platform.environments.provision', operationId: 'platform_environments_provision', method: 'POST', path: '/platform/environments/{environment_id}/provision', pathParams: ['environment_id'], scope: 'operator:environments:write', danger: 'critical', approval: true, body: true, pagination: null },
   'platform.operators.create': { action: 'platform.operators.create', operationId: 'platform_operators_create', method: 'POST', path: '/platform/operators', pathParams: [], scope: 'operator:operators:write', danger: 'critical', approval: true, body: true, pagination: null },
@@ -229,6 +240,18 @@ export class PlatformClient {
   ): Promise<Outcome<TBody, O>> {
     return this.transport.request<TBody, O>(method, path, input, options);
   }
+
+  readonly actionApprovals = {
+    /**
+     * Where an approval you asked for stands
+     *
+     * The `poll_url` of a `202 approval_required`: an approval this token raised, and only those — another token's id is a 404. `status` is `pending`, `approved`, `denied`, `expired` or `consumed`.
+     *
+     * `GET /platform/action-approvals/{id}`
+     */
+    get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<ActionApprovalsGetResponse, O>> =>
+      this.transport.call<ActionApprovalsGetResponse, O>(platformOperations['action_approvals.get'], [id], undefined, options),
+  };
 
   readonly environments = {
     /**

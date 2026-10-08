@@ -120,6 +120,8 @@ export interface ErrorSchema {
   error: string;
   /** Human-readable explanation */
   message: string;
+  /** The id this request was served under, also sent as the X-Request-Id header. Quote it when reporting a problem. */
+  request_id?: string;
   /**
    * Present on `validation_failed` only: the offending request fields, each
    * mapped to its messages.
@@ -430,8 +432,8 @@ export class WorkspaceClient {
     /**
      * Where an approval this key asked for stands
      *
-     * Any workspace key may poll the approvals it raised, and only those: another key's id
-     * is a 404. `status` is `pending`, `approved`, `denied`, `expired` or `consumed`.
+     * Any workspace key — or a member's token — may poll the approvals it raised, and only
+     * those: another credential's id is a 404. `status` is `pending`, `approved`, `denied`, `expired` or `consumed`.
      *
      * `GET /workspace/action-approvals/{id}`
      */

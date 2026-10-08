@@ -194,9 +194,14 @@ describe('management client — errors', () => {
   it('types a validation failure, with its field errors and request id, and never echoes the body', async () => {
     const { fetch } = fakeFetch(
       json(
-        { error: 'validation_failed', message: 'The given data was invalid.', errors: { name: ['The name field is required.'] } },
+        {
+          error: 'validation_failed',
+          message: 'The given data was invalid.',
+          errors: { name: ['The name field is required.'] },
+          request_id: 'req_42',
+        },
         422,
-        { 'x-request-id': 'req_42' },
+        { 'x-request-id': 'req_from_header' },
       ),
     );
     const error = (await env(fetch)
@@ -212,6 +217,11 @@ describe('management client — errors', () => {
     expect(error.requestId).toBe('req_42');
     expect(JSON.stringify(error)).not.toContain('hunter2');
     expect(error.message).not.toContain('hunter2');
+  });
+
+  it('falls back to the X-Request-Id header when the body has no request_id', async () => {
+    const { fetch } = fakeFetch(new Response('<html>Bad gateway</html>', { status: 404, headers: { 'x-request-id': 'req_7' } }));
+    await expect(env(fetch).apps.get('app_1')).rejects.toMatchObject({ status: 404, requestId: 'req_7' });
   });
 
   it('reads an RFC 6750 bearer challenge, and a non-JSON body', async () => {
@@ -358,6 +368,36 @@ describe('management client — credentials', () => {
     expect(() => new EnvironmentClient({ baseUrl: 'http://localhost:8000', apiKey: KEY })).not.toThrow();
   });
 
+  it('drives any environment from the platform root with one token and Cbox-Environment', async () => {
+    const { fetch, calls } = fakeFetch(
+      json({ data: [] }),
+      held('apr_1', 'https://api.cboxid.test/api/v1/action-approvals/apr_1'),
+      approvalStatus('approved'),
+      json({ data: app }, 201),
+    );
+    const root = new EnvironmentClient({
+      baseUrl: 'https://api.cboxid.test',
+      accessToken: 'root_token',
+      environment: 'acme-staging',
+      fetch,
+      approvalPollIntervalMs: 0,
+    });
+
+    await root.apps.list();
+    await root.apps.create({ name: 'A' });
+
+    expect(calls[0]!.url).toBe('https://api.cboxid.test/api/v1/apps');
+    expect(calls).toHaveLength(4);
+    expect(calls[3]!.headers.get('cbox-approval')).toBe('apr_1');
+    expect(calls.every((c) => c.headers.get('cbox-environment') === 'acme-staging')).toBe(true);
+    expect(calls.every((c) => c.headers.get('authorization') === 'Bearer root_token')).toBe(true);
+  });
+
+  it('refuses `environment` with a key, or on another plane', () => {
+    expect(() => new EnvironmentClient({ baseUrl: HOST, apiKey: KEY, environment: 'acme' })).toThrow(ConfigurationError);
+    expect(() => new WorkspaceClient({ accessToken: 't', environment: 'acme' })).toThrow(/environment plane/);
+  });
+
   it('calls a token provider before every request', async () => {
     const { fetch, calls } = fakeFetch(json({ data: [] }), json({ data: [] }));
     let n = 0;
@@ -438,6 +478,17 @@ describe('generated surface', () => {
       danger: 'critical',
     });
     expect(workspaceOperations['team.list']).toMatchObject({ pagination: 'page' });
+    // Scope and danger come from x-scope / x-danger.
+    expect(environmentOperations['audit_logs.events.create']).toMatchObject({
+      method: 'POST',
+      path: '/audit-logs/events',
+      scope: 'audit_logs:write',
+      danger: 'write',
+    });
+    expect(environmentOperations['audit_logs.verify']).toMatchObject({ method: 'GET', path: '/audit-logs/verify', scope: 'audit_logs:read' });
+    expectTypeOf<EnvironmentApi.OrganizationsPortalLinksCreateBody['intents']>().toEqualTypeOf<
+      Array<'sso' | 'dsync' | 'domain_verification' | 'log_streams' | 'certificate_renewal' | 'audit_logs'>
+    >();
   });
 
   it('is exactly what the generator makes of the vendored specs (regenerate with `npm run generate`)', async () => {

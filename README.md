@@ -609,8 +609,8 @@ holds a management credential.
 
 | Client | Plane | Credential | `baseUrl` |
 | --- | --- | --- | --- |
-| `EnvironmentClient` | One environment's tenancy: organizations, users, apps, roles, SSO… | `cbid_env_…` key, or a delegated access token | The environment's own host |
-| `WorkspaceClient` | The workspace above its environments: projects, environments, team, keys | `cbid_ws_…` key | `https://api.cboxid.com` (default) |
+| `EnvironmentClient` | One environment's tenancy: organizations, users, apps, roles, SSO, audit logs… | `cbid_env_…` key, or a delegated access token | The environment's own host, or the platform root with `environment` |
+| `WorkspaceClient` | The workspace above its environments: projects, environments, team, keys | `cbid_ws_…` key, or a person's root token | `https://api.cboxid.com` (default) |
 | `PlatformClient` | The deployment itself, for operators | Delegated operator token only | `https://api.cboxid.com` (default) |
 | `AccountClient` | A person's own account | Delegated token only | The environment's own host |
 
@@ -692,11 +692,30 @@ await env.organizations.create({ name: 'Acme', slug: 'acme' });
   out. `replayed` is `true` when the server returned the first request's stored answer
   (`Idempotent-Replayed`). A secret in a replayed answer is `null`.
 - A failed call throws `CboxIdApiError` with `status`, `error` (the stable code), `message`,
-  `errors` (field-keyed, on `validation_failed`), `requestId` and `retryAfter`. A call that never
+  `errors` (field-keyed, on `validation_failed`), `requestId` (the envelope's `request_id`,
+  else the `X-Request-Id` header; quote it when reporting a problem) and `retryAfter`. A call that never
   got an answer throws `ManagementNetworkError`, which carries the `idempotencyKey` so you can
   repeat the request safely.
 - The client never logs. Secrets in responses are returned as they arrive, and request bodies
   are never put in an error.
+
+### One token for every environment
+
+A person's access token issued at the platform root reaches the workspace, account and
+operator planes there, and any environment of their workspace when the request names it with
+`Cbox-Environment`. Pass `environment` (an id or slug) and the root host as `baseUrl`:
+
+```ts
+const staging = new EnvironmentClient({
+  baseUrl: 'https://api.cboxid.com',
+  accessToken: () => tokens.current(), // the person's root token
+  environment: 'acme-staging',         // sent as Cbox-Environment on every request
+});
+await staging.organizations.portalLinks.create(orgId, { intents: ['sso', 'dsync'] });
+```
+
+What the token may do there is bounded by the person's role and the token's scopes. A
+`cbid_env_…` key is bound to its own environment's host, so `environment` is refused with one.
 
 ### Lists
 
@@ -709,6 +728,41 @@ for await (const org of env.organizations.listAll({ status: 'active' })) {
   console.log(org.id, org.name);
 }
 ```
+
+### Audit Logs
+
+Your app records what its users did, per organization (your customer), and Cbox ID keeps
+each organization's events in a tamper-evident hash chain. `AuditLogger` buffers events and
+sends them in batches of up to 100, each batch under its own `Idempotency-Key`. It sends a
+batch when it is full, every `flushIntervalMs` (default 5 s), and on `flush()` / `close()`. A
+batch that fails stays queued with the same key, so sending it again never records an event
+twice:
+
+```ts
+import { AuditLogger, exportAuditLogs, verifyAuditLogChain } from '@cboxdk/id-js/management';
+
+const audit = new AuditLogger(env, { onError: (e) => console.error('audit flush failed', e) });
+
+audit.record({
+  organization_id: org.id,
+  action: 'invoice.voided',
+  actor: { id: user.id, type: 'user', name: user.name },
+  targets: [{ id: invoice.id, type: 'invoice' }],
+  context: { location: request.ip, user_agent: request.headers['user-agent'] },
+  metadata: { reason: 'duplicate' },
+}); // occurred_at defaults to now
+
+await audit.close(); // on shutdown: stop the timer and send what is left
+```
+
+Read events with `env.auditLogs.events.listAll({ organization_id, actions, range_start })`.
+To get a CSV, `exportAuditLogs(env, filters)` starts an export and polls it until it is ready.
+Its `url` is signed and short-lived. To check the chain yourself instead of trusting the
+server's `env.auditLogs.verify()`, call `verifyAuditLogChain(env, { organization_id })` or
+`verifyAuditChain(events)`. They recompute `sha256(prev_hash + canonical JSON)` exactly as
+the server does: keys sorted at every depth, and slashes and Unicode unescaped. They report
+`{ valid, reason, broken_at_sequence, … }`. Keep floats out of metadata you want to verify:
+`1.0` and `1` arrive as the same JavaScript number.
 
 ### Delegated tokens and DPoP
 
