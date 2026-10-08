@@ -5,6 +5,8 @@ in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-08
+
 ### Added
 
 - `verifyStandardWebhook()`: verifies deliveries from an endpoint on the `standard_webhooks`

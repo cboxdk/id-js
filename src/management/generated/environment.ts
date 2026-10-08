@@ -3527,27 +3527,27 @@ export const environmentOperations = {
   'access_reviews.items.list': { action: 'access_reviews.items.list', operationId: 'access_reviews_items_list', method: 'GET', path: '/access-reviews/{id}/items', pathParams: ['id'], scope: 'governance:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'access_reviews.list': { action: 'access_reviews.list', operationId: 'access_reviews_list', method: 'GET', path: '/access-reviews', pathParams: [], scope: 'governance:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'action_approvals.get': { action: null, operationId: null, method: 'GET', path: '/action-approvals/{id}', pathParams: ['id'], scope: null, danger: null, approval: false, body: false, pagination: null },
-  'api_keys.list': { action: 'api_keys.list', operationId: 'api_keys_list', method: 'GET', path: '/organizations/{organization_id}/api-keys', pathParams: ['organization_id'], scope: 'api_keys:read', danger: null, approval: true, body: false, pagination: 'cursor' },
-  'api_keys.revoke': { action: 'api_keys.revoke', operationId: 'api_keys_revoke', method: 'DELETE', path: '/api-keys/{id}', pathParams: ['id'], scope: 'api_keys:write', danger: null, approval: true, body: false, pagination: null },
-  'apis.create': { action: null, operationId: null, method: 'POST', path: '/apis', pathParams: [], scope: 'apis:write', danger: null, approval: true, body: true, pagination: null },
-  'apis.delete': { action: null, operationId: null, method: 'DELETE', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: null, approval: true, body: false, pagination: null },
-  'apis.get': { action: null, operationId: null, method: 'GET', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:read', danger: null, approval: true, body: false, pagination: null },
-  'apis.list': { action: null, operationId: null, method: 'GET', path: '/apis', pathParams: [], scope: 'apis:read', danger: null, approval: true, body: false, pagination: 'cursor' },
+  'api_keys.list': { action: 'api_keys.list', operationId: 'api_keys_list', method: 'GET', path: '/organizations/{organization_id}/api-keys', pathParams: ['organization_id'], scope: 'api_keys:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'api_keys.revoke': { action: 'api_keys.revoke', operationId: 'api_keys_revoke', method: 'DELETE', path: '/api-keys/{id}', pathParams: ['id'], scope: 'api_keys:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'apis.create': { action: 'apis.create', operationId: null, method: 'POST', path: '/apis', pathParams: [], scope: 'apis:write', danger: 'write', approval: true, body: true, pagination: null },
+  'apis.delete': { action: 'apis.delete', operationId: null, method: 'DELETE', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'apis.get': { action: 'apis.get', operationId: null, method: 'GET', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:read', danger: 'read', approval: true, body: false, pagination: null },
+  'apis.list': { action: 'apis.list', operationId: null, method: 'GET', path: '/apis', pathParams: [], scope: 'apis:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'apis.scopes.define': { action: 'apis.scopes.define', operationId: 'apis_scopes_define', method: 'PUT', path: '/apis/{id}/scopes/{key}', pathParams: ['id', 'key'], scope: 'apis:write', danger: 'write', approval: true, body: true, pagination: null },
   'apis.scopes.remove': { action: 'apis.scopes.remove', operationId: 'apis_scopes_remove', method: 'DELETE', path: '/apis/{id}/scopes/{key}', pathParams: ['id', 'key'], scope: 'apis:write', danger: 'destructive', approval: true, body: false, pagination: null },
-  'apis.update': { action: null, operationId: null, method: 'PATCH', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: null, approval: true, body: true, pagination: null },
+  'apis.update': { action: 'apis.update', operationId: null, method: 'PATCH', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: 'write', approval: true, body: true, pagination: null },
   'approvals.deny': { action: 'approvals.deny', operationId: 'approvals_deny', method: 'POST', path: '/agent-requests/{request_id}/deny', pathParams: ['request_id'], scope: 'approvals:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'approvals.list': { action: 'approvals.list', operationId: 'approvals_list', method: 'GET', path: '/agent-requests', pathParams: [], scope: 'approvals:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
-  'apps.blueprint': { action: 'apps.blueprint', operationId: 'apps_blueprint', method: 'GET', path: '/apps/{id}/blueprint', pathParams: ['id'], scope: 'apps:read', danger: null, approval: true, body: false, pagination: null },
+  'apps.blueprint': { action: 'apps.blueprint', operationId: 'apps_blueprint', method: 'GET', path: '/apps/{id}/blueprint', pathParams: ['id'], scope: 'apps:read', danger: 'read', approval: true, body: false, pagination: null },
   'apps.copy': { action: 'apps.copy', operationId: 'apps_copy', method: 'POST', path: '/apps/{id}/copy', pathParams: ['id'], scope: 'apps:write', danger: 'critical', approval: true, body: true, pagination: null },
   'apps.create': { action: 'apps.create', operationId: 'apps_create', method: 'POST', path: '/apps', pathParams: [], scope: 'apps:write', danger: 'critical', approval: true, body: true, pagination: null },
   'apps.delete': { action: 'apps.delete', operationId: 'apps_delete', method: 'DELETE', path: '/apps/{id}', pathParams: ['id'], scope: 'apps:write', danger: 'critical', approval: true, body: false, pagination: null },
   'apps.get': { action: 'apps.get', operationId: 'apps_get', method: 'GET', path: '/apps/{id}', pathParams: ['id'], scope: 'apps:read', danger: 'read', approval: true, body: false, pagination: null },
-  'apps.list': { action: 'apps.list', operationId: 'apps_list', method: 'GET', path: '/apps', pathParams: [], scope: 'apps:read', danger: null, approval: true, body: false, pagination: 'cursor' },
+  'apps.list': { action: 'apps.list', operationId: 'apps_list', method: 'GET', path: '/apps', pathParams: [], scope: 'apps:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'apps.manifest.set': { action: 'apps.manifest.set', operationId: 'apps_manifest_set', method: 'PUT', path: '/apps/{id}/manifest', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
   'apps.manifest.sync': { action: 'apps.manifest.sync', operationId: 'apps_manifest_sync', method: 'POST', path: '/apps/{id}/manifest/sync', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: false, pagination: null },
   'apps.scopes.set': { action: 'apps.scopes.set', operationId: 'apps_scopes_set', method: 'PUT', path: '/apps/{id}/scopes', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
-  'apps.secrets.list': { action: 'apps.secrets.list', operationId: 'apps_secrets_list', method: 'GET', path: '/apps/{id}/secrets', pathParams: ['id'], scope: 'apps:read', danger: null, approval: true, body: false, pagination: null },
+  'apps.secrets.list': { action: 'apps.secrets.list', operationId: 'apps_secrets_list', method: 'GET', path: '/apps/{id}/secrets', pathParams: ['id'], scope: 'apps:read', danger: 'read', approval: true, body: false, pagination: null },
   'apps.secrets.revoke': { action: 'apps.secrets.revoke', operationId: 'apps_secrets_revoke', method: 'DELETE', path: '/apps/{id}/secrets/{secret_id}', pathParams: ['id', 'secret_id'], scope: 'apps:write', danger: 'critical', approval: true, body: false, pagination: null },
   'apps.secrets.rotate': { action: 'apps.secrets.rotate', operationId: 'apps_secrets_rotate', method: 'POST', path: '/apps/{id}/secrets', pathParams: ['id'], scope: 'apps:write', danger: 'critical', approval: true, body: true, pagination: null },
   'apps.settings.api_key_prefix': { action: 'apps.settings.api_key_prefix', operationId: 'apps_settings_api_key_prefix', method: 'PUT', path: '/apps/{id}/settings/api-key-prefix', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
@@ -3596,10 +3596,10 @@ export const environmentOperations = {
   'hooks.get': { action: 'hooks.get', operationId: 'hooks_get', method: 'GET', path: '/hooks/{id}', pathParams: ['id'], scope: 'hooks:read', danger: 'read', approval: true, body: false, pagination: null },
   'hooks.list': { action: 'hooks.list', operationId: 'hooks_list', method: 'GET', path: '/hooks', pathParams: [], scope: 'hooks:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'hooks.update': { action: 'hooks.update', operationId: 'hooks_update', method: 'PATCH', path: '/hooks/{id}', pathParams: ['id'], scope: 'hooks:write', danger: 'critical', approval: true, body: true, pagination: null },
-  'invitations.list': { action: 'invitations.list', operationId: 'invitations_list', method: 'GET', path: '/organizations/{organization_id}/invitations', pathParams: ['organization_id'], scope: 'invitations:read', danger: null, approval: true, body: false, pagination: 'cursor' },
-  'invitations.resend': { action: 'invitations.resend', operationId: 'invitations_resend', method: 'POST', path: '/organizations/{organization_id}/invitations/{invitation_id}/resend', pathParams: ['organization_id', 'invitation_id'], scope: 'invitations:write', danger: null, approval: true, body: false, pagination: null },
-  'invitations.revoke': { action: 'invitations.revoke', operationId: 'invitations_revoke', method: 'DELETE', path: '/organizations/{organization_id}/invitations/{invitation_id}', pathParams: ['organization_id', 'invitation_id'], scope: 'invitations:write', danger: null, approval: true, body: false, pagination: null },
-  'invitations.send': { action: 'invitations.send', operationId: 'invitations_send', method: 'POST', path: '/organizations/{organization_id}/invitations', pathParams: ['organization_id'], scope: 'invitations:write', danger: null, approval: true, body: true, pagination: null },
+  'invitations.list': { action: 'invitations.list', operationId: 'invitations_list', method: 'GET', path: '/organizations/{organization_id}/invitations', pathParams: ['organization_id'], scope: 'invitations:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'invitations.resend': { action: 'invitations.resend', operationId: 'invitations_resend', method: 'POST', path: '/organizations/{organization_id}/invitations/{invitation_id}/resend', pathParams: ['organization_id', 'invitation_id'], scope: 'invitations:write', danger: 'write', approval: true, body: false, pagination: null },
+  'invitations.revoke': { action: 'invitations.revoke', operationId: 'invitations_revoke', method: 'DELETE', path: '/organizations/{organization_id}/invitations/{invitation_id}', pathParams: ['organization_id', 'invitation_id'], scope: 'invitations:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'invitations.send': { action: 'invitations.send', operationId: 'invitations_send', method: 'POST', path: '/organizations/{organization_id}/invitations', pathParams: ['organization_id'], scope: 'invitations:write', danger: 'write', approval: true, body: true, pagination: null },
   'keys.create': { action: 'keys.create', operationId: 'keys_create', method: 'POST', path: '/keys', pathParams: [], scope: 'keys:write', danger: 'critical', approval: true, body: true, pagination: null },
   'keys.list': { action: 'keys.list', operationId: 'keys_list', method: 'GET', path: '/keys', pathParams: [], scope: 'keys:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'keys.revoke': { action: 'keys.revoke', operationId: 'keys_revoke', method: 'DELETE', path: '/keys/{id}', pathParams: ['id'], scope: 'keys:write', danger: 'destructive', approval: true, body: false, pagination: null },
@@ -3614,29 +3614,29 @@ export const environmentOperations = {
   'log_streams.list': { action: 'log_streams.list', operationId: 'log_streams_list', method: 'GET', path: '/log-streams', pathParams: [], scope: 'log_streams:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'log_streams.test': { action: 'log_streams.test', operationId: 'log_streams_test', method: 'POST', path: '/log-streams/{id}/test', pathParams: ['id'], scope: 'log_streams:write', danger: 'write', approval: true, body: false, pagination: null },
   'log_streams.update': { action: 'log_streams.update', operationId: 'log_streams_update', method: 'PATCH', path: '/log-streams/{id}', pathParams: ['id'], scope: 'log_streams:write', danger: 'critical', approval: true, body: true, pagination: null },
-  'members.add': { action: 'members.add', operationId: 'members_add', method: 'POST', path: '/organizations/{organization_id}/members', pathParams: ['organization_id'], scope: 'members:write', danger: null, approval: true, body: true, pagination: null },
-  'members.list': { action: 'members.list', operationId: 'members_list', method: 'GET', path: '/organizations/{organization_id}/members', pathParams: ['organization_id'], scope: 'members:read', danger: null, approval: true, body: false, pagination: 'cursor' },
-  'members.remove': { action: 'members.remove', operationId: 'members_remove', method: 'DELETE', path: '/organizations/{organization_id}/members/{user_id}', pathParams: ['organization_id', 'user_id'], scope: 'members:write', danger: null, approval: true, body: false, pagination: null },
-  'members.roles.grant': { action: 'members.roles.grant', operationId: 'members_roles_grant', method: 'PUT', path: '/organizations/{organization_id}/members/{user_id}/roles/{role_id}', pathParams: ['organization_id', 'user_id', 'role_id'], scope: 'roles:write', danger: null, approval: true, body: false, pagination: null },
-  'members.roles.list': { action: 'members.roles.list', operationId: 'members_roles_list', method: 'GET', path: '/organizations/{organization_id}/members/{user_id}/roles', pathParams: ['organization_id', 'user_id'], scope: 'roles:read', danger: null, approval: true, body: false, pagination: null },
-  'members.roles.revoke': { action: 'members.roles.revoke', operationId: 'members_roles_revoke', method: 'DELETE', path: '/organizations/{organization_id}/members/{user_id}/roles/{role_id}', pathParams: ['organization_id', 'user_id', 'role_id'], scope: 'roles:write', danger: null, approval: true, body: false, pagination: null },
-  'members.update': { action: 'members.update', operationId: 'members_update', method: 'PATCH', path: '/organizations/{organization_id}/members/{user_id}', pathParams: ['organization_id', 'user_id'], scope: 'members:write', danger: null, approval: true, body: true, pagination: null },
-  'organizations.create': { action: 'organizations.create', operationId: 'organizations_create', method: 'POST', path: '/organizations', pathParams: [], scope: 'organizations:write', danger: null, approval: true, body: true, pagination: null },
-  'organizations.delete': { action: 'organizations.delete', operationId: 'organizations_delete', method: 'DELETE', path: '/organizations/{id}', pathParams: ['id'], scope: 'organizations:write', danger: null, approval: true, body: false, pagination: null },
+  'members.add': { action: 'members.add', operationId: 'members_add', method: 'POST', path: '/organizations/{organization_id}/members', pathParams: ['organization_id'], scope: 'members:write', danger: 'write', approval: true, body: true, pagination: null },
+  'members.list': { action: 'members.list', operationId: 'members_list', method: 'GET', path: '/organizations/{organization_id}/members', pathParams: ['organization_id'], scope: 'members:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'members.remove': { action: 'members.remove', operationId: 'members_remove', method: 'DELETE', path: '/organizations/{organization_id}/members/{user_id}', pathParams: ['organization_id', 'user_id'], scope: 'members:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'members.roles.grant': { action: 'members.roles.grant', operationId: 'members_roles_grant', method: 'PUT', path: '/organizations/{organization_id}/members/{user_id}/roles/{role_id}', pathParams: ['organization_id', 'user_id', 'role_id'], scope: 'roles:write', danger: 'write', approval: true, body: false, pagination: null },
+  'members.roles.list': { action: 'members.roles.list', operationId: 'members_roles_list', method: 'GET', path: '/organizations/{organization_id}/members/{user_id}/roles', pathParams: ['organization_id', 'user_id'], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
+  'members.roles.revoke': { action: 'members.roles.revoke', operationId: 'members_roles_revoke', method: 'DELETE', path: '/organizations/{organization_id}/members/{user_id}/roles/{role_id}', pathParams: ['organization_id', 'user_id', 'role_id'], scope: 'roles:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'members.update': { action: 'members.update', operationId: 'members_update', method: 'PATCH', path: '/organizations/{organization_id}/members/{user_id}', pathParams: ['organization_id', 'user_id'], scope: 'members:write', danger: 'write', approval: true, body: true, pagination: null },
+  'organizations.create': { action: 'organizations.create', operationId: 'organizations_create', method: 'POST', path: '/organizations', pathParams: [], scope: 'organizations:write', danger: 'write', approval: true, body: true, pagination: null },
+  'organizations.delete': { action: 'organizations.delete', operationId: 'organizations_delete', method: 'DELETE', path: '/organizations/{id}', pathParams: ['id'], scope: 'organizations:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'organizations.domains.add': { action: 'organizations.domains.add', operationId: 'organizations_domains_add', method: 'POST', path: '/organizations/{organization_id}/domains', pathParams: ['organization_id'], scope: 'organizations:write', danger: 'write', approval: true, body: true, pagination: null },
   'organizations.domains.capture': { action: 'organizations.domains.capture', operationId: 'organizations_domains_capture', method: 'PUT', path: '/organizations/{organization_id}/domains/{domain_id}/capture', pathParams: ['organization_id', 'domain_id'], scope: 'organizations:write', danger: 'critical', approval: true, body: true, pagination: null },
-  'organizations.domains.list': { action: 'organizations.domains.list', operationId: 'organizations_domains_list', method: 'GET', path: '/organizations/{organization_id}/domains', pathParams: ['organization_id'], scope: 'organizations:read', danger: null, approval: true, body: false, pagination: null },
+  'organizations.domains.list': { action: 'organizations.domains.list', operationId: 'organizations_domains_list', method: 'GET', path: '/organizations/{organization_id}/domains', pathParams: ['organization_id'], scope: 'organizations:read', danger: 'read', approval: true, body: false, pagination: null },
   'organizations.domains.remove': { action: 'organizations.domains.remove', operationId: 'organizations_domains_remove', method: 'DELETE', path: '/organizations/{organization_id}/domains/{domain_id}', pathParams: ['organization_id', 'domain_id'], scope: 'organizations:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'organizations.domains.verify': { action: 'organizations.domains.verify', operationId: 'organizations_domains_verify', method: 'POST', path: '/organizations/{organization_id}/domains/{domain_id}/verify', pathParams: ['organization_id', 'domain_id'], scope: 'organizations:write', danger: 'write', approval: true, body: false, pagination: null },
-  'organizations.get': { action: 'organizations.get', operationId: 'organizations_get', method: 'GET', path: '/organizations/{id}', pathParams: ['id'], scope: 'organizations:read', danger: null, approval: true, body: false, pagination: null },
-  'organizations.list': { action: 'organizations.list', operationId: 'organizations_list', method: 'GET', path: '/organizations', pathParams: [], scope: 'organizations:read', danger: null, approval: true, body: false, pagination: 'cursor' },
+  'organizations.get': { action: 'organizations.get', operationId: 'organizations_get', method: 'GET', path: '/organizations/{id}', pathParams: ['id'], scope: 'organizations:read', danger: 'read', approval: true, body: false, pagination: null },
+  'organizations.list': { action: 'organizations.list', operationId: 'organizations_list', method: 'GET', path: '/organizations', pathParams: [], scope: 'organizations:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'organizations.portal_links.create': { action: 'organizations.portal_links.create', operationId: 'organizations_portal_links_create', method: 'POST', path: '/organizations/{organization_id}/portal-links', pathParams: ['organization_id'], scope: 'portal_links:write', danger: 'critical', approval: true, body: true, pagination: null },
   'organizations.portal_links.list': { action: 'organizations.portal_links.list', operationId: 'organizations_portal_links_list', method: 'GET', path: '/organizations/{organization_id}/portal-links', pathParams: ['organization_id'], scope: 'portal_links:read', danger: 'read', approval: true, body: false, pagination: null },
   'organizations.portal_links.revoke': { action: 'organizations.portal_links.revoke', operationId: 'organizations_portal_links_revoke', method: 'DELETE', path: '/organizations/{organization_id}/portal-links/{id}', pathParams: ['organization_id', 'id'], scope: 'portal_links:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'organizations.reactivate': { action: 'organizations.reactivate', operationId: 'organizations_reactivate', method: 'POST', path: '/organizations/{id}/reactivate', pathParams: ['id'], scope: 'organizations:write', danger: 'write', approval: true, body: false, pagination: null },
   'organizations.suspend': { action: 'organizations.suspend', operationId: 'organizations_suspend', method: 'POST', path: '/organizations/{id}/suspend', pathParams: ['id'], scope: 'organizations:write', danger: 'write', approval: true, body: false, pagination: null },
-  'organizations.transfer_ownership': { action: 'organizations.transfer_ownership', operationId: 'organizations_transfer_ownership', method: 'POST', path: '/organizations/{id}/transfer-ownership', pathParams: ['id'], scope: 'organizations:write', danger: null, approval: true, body: true, pagination: null },
-  'organizations.update': { action: 'organizations.update', operationId: 'organizations_update', method: 'PATCH', path: '/organizations/{id}', pathParams: ['id'], scope: 'organizations:write', danger: null, approval: true, body: true, pagination: null },
+  'organizations.transfer_ownership': { action: 'organizations.transfer_ownership', operationId: 'organizations_transfer_ownership', method: 'POST', path: '/organizations/{id}/transfer-ownership', pathParams: ['id'], scope: 'organizations:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'organizations.update': { action: 'organizations.update', operationId: 'organizations_update', method: 'PATCH', path: '/organizations/{id}', pathParams: ['id'], scope: 'organizations:write', danger: 'write', approval: true, body: true, pagination: null },
   'permissions.create': { action: 'permissions.create', operationId: 'permissions_create', method: 'POST', path: '/permissions', pathParams: [], scope: 'role_definitions:write', danger: 'write', approval: true, body: true, pagination: null },
   'permissions.delete': { action: 'permissions.delete', operationId: 'permissions_delete', method: 'DELETE', path: '/permissions/{id}', pathParams: ['id'], scope: 'role_definitions:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'permissions.list': { action: 'permissions.list', operationId: 'permissions_list', method: 'GET', path: '/permissions', pathParams: [], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
@@ -3649,7 +3649,7 @@ export const environmentOperations = {
   'roles.create': { action: 'roles.create', operationId: 'roles_create', method: 'POST', path: '/roles', pathParams: [], scope: 'role_definitions:write', danger: 'write', approval: true, body: true, pagination: null },
   'roles.delete': { action: 'roles.delete', operationId: 'roles_delete', method: 'DELETE', path: '/roles/{id}', pathParams: ['id'], scope: 'role_definitions:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'roles.get': { action: 'roles.get', operationId: 'roles_get', method: 'GET', path: '/roles/{id}', pathParams: ['id'], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
-  'roles.list': { action: 'roles.list', operationId: 'roles_list', method: 'GET', path: '/roles', pathParams: [], scope: 'roles:read', danger: null, approval: true, body: false, pagination: null },
+  'roles.list': { action: 'roles.list', operationId: 'roles_list', method: 'GET', path: '/roles', pathParams: [], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
   'roles.permissions.grant': { action: 'roles.permissions.grant', operationId: 'roles_permissions_grant', method: 'PUT', path: '/roles/{id}/permissions/{permission_id}', pathParams: ['id', 'permission_id'], scope: 'role_definitions:write', danger: 'write', approval: true, body: false, pagination: null },
   'roles.permissions.revoke': { action: 'roles.permissions.revoke', operationId: 'roles_permissions_revoke', method: 'DELETE', path: '/roles/{id}/permissions/{permission_id}', pathParams: ['id', 'permission_id'], scope: 'role_definitions:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'roles.update': { action: 'roles.update', operationId: 'roles_update', method: 'PATCH', path: '/roles/{id}', pathParams: ['id'], scope: 'role_definitions:write', danger: 'write', approval: true, body: true, pagination: null },
@@ -3688,7 +3688,7 @@ export const environmentOperations = {
   'sso.domains.verify': { action: 'sso.domains.verify', operationId: 'sso_domains_verify', method: 'POST', path: '/sso/domains/{id}/verify', pathParams: ['id'], scope: 'sso:write', danger: 'write', approval: true, body: true, pagination: null },
   'sso.saml_metadata.import': { action: 'sso.saml_metadata.import', operationId: 'sso_saml_metadata_import', method: 'POST', path: '/sso/saml-metadata', pathParams: [], scope: 'sso:write', danger: 'write', approval: true, body: true, pagination: null },
   'support_sessions.end': { action: 'support_sessions.end', operationId: 'support_sessions_end', method: 'DELETE', path: '/support-sessions/{id}', pathParams: ['id'], scope: 'support:write', danger: 'destructive', approval: true, body: false, pagination: null },
-  'support_sessions.start': { action: 'support_sessions.start', operationId: 'support_sessions_start', method: 'POST', path: '/support-sessions', pathParams: [], scope: 'support:write', danger: null, approval: true, body: true, pagination: null },
+  'support_sessions.start': { action: 'support_sessions.start', operationId: 'support_sessions_start', method: 'POST', path: '/support-sessions', pathParams: [], scope: 'support:write', danger: 'critical', approval: true, body: true, pagination: null },
   'token_vault.grants.create': { action: 'token_vault.grants.create', operationId: 'token_vault_grants_create', method: 'POST', path: '/token-vault/secrets/{id}/grants', pathParams: ['id'], scope: 'token_vault:write', danger: 'critical', approval: true, body: true, pagination: null },
   'token_vault.grants.delete': { action: 'token_vault.grants.delete', operationId: 'token_vault_grants_delete', method: 'DELETE', path: '/token-vault/secrets/{id}/grants/{client_id}', pathParams: ['id', 'client_id'], scope: 'token_vault:write', danger: 'destructive', approval: true, body: true, pagination: null },
   'token_vault.secrets.create': { action: 'token_vault.secrets.create', operationId: 'token_vault_secrets_create', method: 'POST', path: '/token-vault/secrets', pathParams: [], scope: 'token_vault:write', danger: 'write', approval: true, body: true, pagination: null },
@@ -3696,20 +3696,20 @@ export const environmentOperations = {
   'token_vault.secrets.list': { action: 'token_vault.secrets.list', operationId: 'token_vault_secrets_list', method: 'GET', path: '/token-vault/secrets', pathParams: [], scope: 'token_vault:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'token_vault.secrets.revoke': { action: 'token_vault.secrets.revoke', operationId: 'token_vault_secrets_revoke', method: 'POST', path: '/token-vault/secrets/{id}/revoke', pathParams: ['id'], scope: 'token_vault:write', danger: 'destructive', approval: true, body: true, pagination: null },
   'token_vault.secrets.rotate': { action: 'token_vault.secrets.rotate', operationId: 'token_vault_secrets_rotate', method: 'POST', path: '/token-vault/secrets/{id}/rotate', pathParams: ['id'], scope: 'token_vault:write', danger: 'critical', approval: true, body: true, pagination: null },
-  'users.create': { action: 'users.create', operationId: 'users_create', method: 'POST', path: '/users', pathParams: [], scope: 'users:write', danger: null, approval: true, body: true, pagination: null },
-  'users.deactivate': { action: 'users.deactivate', operationId: 'users_deactivate', method: 'DELETE', path: '/users/{id}', pathParams: ['id'], scope: 'users:write', danger: null, approval: true, body: false, pagination: null },
-  'users.environment_roles.get': { action: 'users.environment_roles.get', operationId: 'users_environment_roles_get', method: 'GET', path: '/users/{id}/environment-roles/{role_id}', pathParams: ['id', 'role_id'], scope: 'roles:read', danger: null, approval: true, body: false, pagination: null },
-  'users.environment_roles.grant': { action: 'users.environment_roles.grant', operationId: 'users_environment_roles_grant', method: 'PUT', path: '/users/{id}/environment-roles/{role_id}', pathParams: ['id', 'role_id'], scope: 'roles:write', danger: null, approval: true, body: false, pagination: null },
-  'users.environment_roles.list': { action: 'users.environment_roles.list', operationId: 'users_environment_roles_list', method: 'GET', path: '/users/{id}/environment-roles', pathParams: ['id'], scope: 'roles:read', danger: null, approval: true, body: false, pagination: null },
-  'users.environment_roles.revoke': { action: 'users.environment_roles.revoke', operationId: 'users_environment_roles_revoke', method: 'DELETE', path: '/users/{id}/environment-roles/{role_id}', pathParams: ['id', 'role_id'], scope: 'roles:write', danger: null, approval: true, body: false, pagination: null },
+  'users.create': { action: 'users.create', operationId: 'users_create', method: 'POST', path: '/users', pathParams: [], scope: 'users:write', danger: 'write', approval: true, body: true, pagination: null },
+  'users.deactivate': { action: 'users.deactivate', operationId: 'users_deactivate', method: 'DELETE', path: '/users/{id}', pathParams: ['id'], scope: 'users:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'users.environment_roles.get': { action: 'users.environment_roles.get', operationId: 'users_environment_roles_get', method: 'GET', path: '/users/{id}/environment-roles/{role_id}', pathParams: ['id', 'role_id'], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
+  'users.environment_roles.grant': { action: 'users.environment_roles.grant', operationId: 'users_environment_roles_grant', method: 'PUT', path: '/users/{id}/environment-roles/{role_id}', pathParams: ['id', 'role_id'], scope: 'roles:write', danger: 'critical', approval: true, body: false, pagination: null },
+  'users.environment_roles.list': { action: 'users.environment_roles.list', operationId: 'users_environment_roles_list', method: 'GET', path: '/users/{id}/environment-roles', pathParams: ['id'], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
+  'users.environment_roles.revoke': { action: 'users.environment_roles.revoke', operationId: 'users_environment_roles_revoke', method: 'DELETE', path: '/users/{id}/environment-roles/{role_id}', pathParams: ['id', 'role_id'], scope: 'roles:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'users.erase': { action: 'users.erase', operationId: 'users_erase', method: 'POST', path: '/users/{id}/erase', pathParams: ['id'], scope: 'users:erase', danger: 'critical', approval: true, body: false, pagination: null },
-  'users.get': { action: 'users.get', operationId: 'users_get', method: 'GET', path: '/users/{id}', pathParams: ['id'], scope: 'users:read', danger: null, approval: true, body: false, pagination: null },
-  'users.list': { action: 'users.list', operationId: 'users_list', method: 'GET', path: '/users', pathParams: [], scope: 'users:read', danger: null, approval: true, body: false, pagination: 'cursor' },
+  'users.get': { action: 'users.get', operationId: 'users_get', method: 'GET', path: '/users/{id}', pathParams: ['id'], scope: 'users:read', danger: 'read', approval: true, body: false, pagination: null },
+  'users.list': { action: 'users.list', operationId: 'users_list', method: 'GET', path: '/users', pathParams: [], scope: 'users:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'users.mfa.reset': { action: 'users.mfa.reset', operationId: 'users_mfa_reset', method: 'DELETE', path: '/users/{id}/mfa', pathParams: ['id'], scope: 'users:write', danger: 'critical', approval: true, body: false, pagination: null },
   'users.password_reset.send': { action: 'users.password_reset.send', operationId: 'users_password_reset_send', method: 'POST', path: '/users/{id}/password-reset', pathParams: ['id'], scope: 'users:write', danger: 'write', approval: true, body: false, pagination: null },
   'users.password.set': { action: 'users.password.set', operationId: 'users_password_set', method: 'POST', path: '/users/{id}/password', pathParams: ['id'], scope: 'users:write', danger: 'critical', approval: true, body: true, pagination: null },
   'users.reactivate': { action: 'users.reactivate', operationId: 'users_reactivate', method: 'POST', path: '/users/{id}/reactivate', pathParams: ['id'], scope: 'users:write', danger: 'write', approval: true, body: false, pagination: null },
-  'users.sessions.list': { action: 'users.sessions.list', operationId: 'users_sessions_list', method: 'GET', path: '/users/{id}/sessions', pathParams: ['id'], scope: 'users:read', danger: null, approval: true, body: false, pagination: null },
+  'users.sessions.list': { action: 'users.sessions.list', operationId: 'users_sessions_list', method: 'GET', path: '/users/{id}/sessions', pathParams: ['id'], scope: 'users:read', danger: 'read', approval: true, body: false, pagination: null },
   'users.sessions.revoke': { action: 'users.sessions.revoke', operationId: 'users_sessions_revoke', method: 'DELETE', path: '/users/{id}/sessions/{session_id}', pathParams: ['id', 'session_id'], scope: 'users:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'users.sessions.revoke_all': { action: 'users.sessions.revoke_all', operationId: 'users_sessions_revoke_all', method: 'DELETE', path: '/users/{id}/sessions', pathParams: ['id'], scope: 'users:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'users.update': { action: 'users.update', operationId: 'users_update', method: 'PATCH', path: '/users/{id}', pathParams: ['id'], scope: 'users:write', danger: 'critical', approval: true, body: true, pagination: null },
@@ -3865,6 +3865,7 @@ export class EnvironmentClient {
      *
      * `GET /organizations/{organization_id}/api-keys` · action `api_keys.list`
      * @scope `api_keys:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(organizationId: string, query?: ApiKeysListQuery, options?: O): Promise<Outcome<ApiKeysListResponse, O>> =>
@@ -3881,6 +3882,7 @@ export class EnvironmentClient {
      *
      * `DELETE /api-keys/{id}` · action `api_keys.revoke`
      * @scope `api_keys:write`
+     * @danger destructive
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     revoke: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<ApiKeysRevokeResponse, O>> =>
@@ -3898,8 +3900,9 @@ export class EnvironmentClient {
      * `organization_id` makes the API one organization's; left out, the environment owns
      * it. Refusals are `422 invalid_api` with the reason.
      *
-     * `POST /apis`
+     * `POST /apis` · action `apis.create`
      * @scope `apis:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     create: <O extends CallOptions = CallOptions>(body: ApisCreateBody, options?: O): Promise<Outcome<ApisCreateResponse, O>> =>
@@ -3910,8 +3913,9 @@ export class EnvironmentClient {
      * Requires scope `apis:write`. Tokens already minted for it keep their `aud` until they
      * expire; apps holding its scope keys keep them as plain scopes.
      *
-     * `DELETE /apis/{id}`
+     * `DELETE /apis/{id}` · action `apis.delete`
      * @scope `apis:write`
+     * @danger destructive
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     delete: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<ApisDeleteResponse, O>> =>
@@ -3921,8 +3925,9 @@ export class EnvironmentClient {
      *
      * Requires scope `apis:read`.
      *
-     * `GET /apis/{id}`
+     * `GET /apis/{id}` · action `apis.get`
      * @scope `apis:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<ApisGetResponse, O>> =>
@@ -3932,8 +3937,9 @@ export class EnvironmentClient {
      *
      * Requires scope `apis:read`.
      *
-     * `GET /apis`
+     * `GET /apis` · action `apis.list`
      * @scope `apis:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: ApisListQuery, options?: O): Promise<Outcome<ApisListResponse, O>> =>
@@ -3949,8 +3955,9 @@ export class EnvironmentClient {
      * updated, scopes left out are removed. All or nothing. The identifier never changes:
      * register a new API instead.
      *
-     * `PATCH /apis/{id}`
+     * `PATCH /apis/{id}` · action `apis.update`
      * @scope `apis:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     update: <O extends CallOptions = CallOptions>(id: string, body?: ApisUpdateBody, options?: O): Promise<Outcome<ApisUpdateResponse, O>> =>
@@ -4024,6 +4031,7 @@ export class EnvironmentClient {
      *
      * `GET /apps/{id}/blueprint` · action `apps.blueprint`
      * @scope `apps:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     blueprint: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<AppsBlueprintResponse, O>> =>
@@ -4099,6 +4107,7 @@ export class EnvironmentClient {
      *
      * `GET /apps` · action `apps.list`
      * @scope `apps:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: AppsListQuery, options?: O): Promise<Outcome<AppsListResponse, O>> =>
@@ -4169,6 +4178,7 @@ export class EnvironmentClient {
        *
        * `GET /apps/{id}/secrets` · action `apps.secrets.list`
        * @scope `apps:read`
+       * @danger read
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       list: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<AppsSecretsListResponse, O>> =>
@@ -4816,6 +4826,7 @@ export class EnvironmentClient {
      *
      * `GET /organizations/{organization_id}/invitations` · action `invitations.list`
      * @scope `invitations:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(organizationId: string, query?: InvitationsListQuery, options?: O): Promise<Outcome<InvitationsListResponse, O>> =>
@@ -4836,6 +4847,7 @@ export class EnvironmentClient {
      *
      * `POST /organizations/{organization_id}/invitations/{invitation_id}/resend` · action `invitations.resend`
      * @scope `invitations:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     resend: <O extends CallOptions = CallOptions>(organizationId: string, invitationId: string, options?: O): Promise<Outcome<InvitationsResendResponse, O>> =>
@@ -4848,6 +4860,7 @@ export class EnvironmentClient {
      *
      * `DELETE /organizations/{organization_id}/invitations/{invitation_id}` · action `invitations.revoke`
      * @scope `invitations:write`
+     * @danger destructive
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     revoke: <O extends CallOptions = CallOptions>(organizationId: string, invitationId: string, options?: O): Promise<Outcome<InvitationsRevokeResponse, O>> =>
@@ -4877,6 +4890,7 @@ export class EnvironmentClient {
      *
      * `POST /organizations/{organization_id}/invitations` · action `invitations.send`
      * @scope `invitations:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     send: <O extends CallOptions = CallOptions>(organizationId: string, body: InvitationsSendBody, options?: O): Promise<Outcome<InvitationsSendResponse, O>> =>
@@ -5088,6 +5102,7 @@ export class EnvironmentClient {
      *
      * `POST /organizations/{organization_id}/members` · action `members.add`
      * @scope `members:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     add: <O extends CallOptions = CallOptions>(organizationId: string, body?: MembersAddBody, options?: O): Promise<Outcome<MembersAddResponse, O>> =>
@@ -5099,6 +5114,7 @@ export class EnvironmentClient {
      *
      * `GET /organizations/{organization_id}/members` · action `members.list`
      * @scope `members:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(organizationId: string, query?: MembersListQuery, options?: O): Promise<Outcome<MembersListResponse, O>> =>
@@ -5114,6 +5130,7 @@ export class EnvironmentClient {
      *
      * `DELETE /organizations/{organization_id}/members/{user_id}` · action `members.remove`
      * @scope `members:write`
+     * @danger destructive
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     remove: <O extends CallOptions = CallOptions>(organizationId: string, userId: string, options?: O): Promise<Outcome<MembersRemoveResponse, O>> =>
@@ -5126,6 +5143,7 @@ export class EnvironmentClient {
      *
      * `PATCH /organizations/{organization_id}/members/{user_id}` · action `members.update`
      * @scope `members:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     update: <O extends CallOptions = CallOptions>(organizationId: string, userId: string, body: MembersUpdateBody, options?: O): Promise<Outcome<MembersUpdateResponse, O>> =>
@@ -5148,6 +5166,7 @@ export class EnvironmentClient {
        *
        * `PUT /organizations/{organization_id}/members/{user_id}/roles/{role_id}` · action `members.roles.grant`
        * @scope `roles:write`
+       * @danger write
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       grant: <O extends CallOptions = CallOptions>(organizationId: string, userId: string, roleId: string, query?: MembersRolesGrantQuery, options?: O): Promise<Outcome<MembersRolesGrantResponse, O>> =>
@@ -5161,6 +5180,7 @@ export class EnvironmentClient {
        *
        * `GET /organizations/{organization_id}/members/{user_id}/roles` · action `members.roles.list`
        * @scope `roles:read`
+       * @danger read
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       list: <O extends CallOptions = CallOptions>(organizationId: string, userId: string, options?: O): Promise<Outcome<MembersRolesListResponse, O>> =>
@@ -5172,6 +5192,7 @@ export class EnvironmentClient {
        *
        * `DELETE /organizations/{organization_id}/members/{user_id}/roles/{role_id}` · action `members.roles.revoke`
        * @scope `roles:write`
+       * @danger destructive
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       revoke: <O extends CallOptions = CallOptions>(organizationId: string, userId: string, roleId: string, query?: MembersRolesRevokeQuery, options?: O): Promise<Outcome<MembersRolesRevokeResponse, O>> =>
@@ -5187,6 +5208,7 @@ export class EnvironmentClient {
      *
      * `POST /organizations` · action `organizations.create`
      * @scope `organizations:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     create: <O extends CallOptions = CallOptions>(body: OrganizationsCreateBody, options?: O): Promise<Outcome<OrganizationsCreateResponse, O>> =>
@@ -5204,6 +5226,7 @@ export class EnvironmentClient {
      *
      * `DELETE /organizations/{id}` · action `organizations.delete`
      * @scope `organizations:write`
+     * @danger destructive
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     delete: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<OrganizationsDeleteResponse, O>> =>
@@ -5215,6 +5238,7 @@ export class EnvironmentClient {
      *
      * `GET /organizations/{id}` · action `organizations.get`
      * @scope `organizations:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<OrganizationsGetResponse, O>> =>
@@ -5227,6 +5251,7 @@ export class EnvironmentClient {
      *
      * `GET /organizations` · action `organizations.list`
      * @scope `organizations:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: OrganizationsListQuery, options?: O): Promise<Outcome<OrganizationsListResponse, O>> =>
@@ -5271,6 +5296,7 @@ export class EnvironmentClient {
      *
      * `POST /organizations/{id}/transfer-ownership` · action `organizations.transfer_ownership`
      * @scope `organizations:write`
+     * @danger critical
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     transferOwnership: <O extends CallOptions = CallOptions>(id: string, body: OrganizationsTransferOwnershipBody, options?: O): Promise<Outcome<OrganizationsTransferOwnershipResponse, O>> =>
@@ -5285,6 +5311,7 @@ export class EnvironmentClient {
      *
      * `PATCH /organizations/{id}` · action `organizations.update`
      * @scope `organizations:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     update: <O extends CallOptions = CallOptions>(id: string, body?: OrganizationsUpdateBody, options?: O): Promise<Outcome<OrganizationsUpdateResponse, O>> =>
@@ -5322,6 +5349,7 @@ export class EnvironmentClient {
        *
        * `GET /organizations/{organization_id}/domains` · action `organizations.domains.list`
        * @scope `organizations:read`
+       * @danger read
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       list: <O extends CallOptions = CallOptions>(organizationId: string, options?: O): Promise<Outcome<OrganizationsDomainsListResponse, O>> =>
@@ -5565,6 +5593,7 @@ export class EnvironmentClient {
      *
      * `GET /roles` · action `roles.list`
      * @scope `roles:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: RolesListQuery, options?: O): Promise<Outcome<RolesListResponse, O>> =>
@@ -6102,6 +6131,7 @@ export class EnvironmentClient {
      *
      * `POST /support-sessions` · action `support_sessions.start`
      * @scope `support:write`
+     * @danger critical
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     start: <O extends CallOptions = CallOptions>(body: SupportSessionsStartBody, options?: O): Promise<Outcome<SupportSessionsStartResponse, O>> =>
@@ -6210,6 +6240,7 @@ export class EnvironmentClient {
      *
      * `POST /users` · action `users.create`
      * @scope `users:write`
+     * @danger write
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     create: <O extends CallOptions = CallOptions>(body: UsersCreateBody, options?: O): Promise<Outcome<UsersCreateResponse, O>> =>
@@ -6224,6 +6255,7 @@ export class EnvironmentClient {
      *
      * `DELETE /users/{id}` · action `users.deactivate`
      * @scope `users:write`
+     * @danger destructive
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     deactivate: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<UsersDeactivateResponse, O>> =>
@@ -6247,6 +6279,7 @@ export class EnvironmentClient {
      *
      * `GET /users/{id}` · action `users.get`
      * @scope `users:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<UsersGetResponse, O>> =>
@@ -6260,6 +6293,7 @@ export class EnvironmentClient {
      *
      * `GET /users` · action `users.list`
      * @scope `users:read`
+     * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     list: <O extends CallOptions = CallOptions>(query?: UsersListQuery, options?: O): Promise<Outcome<UsersListResponse, O>> =>
@@ -6311,6 +6345,7 @@ export class EnvironmentClient {
        *
        * `GET /users/{id}/environment-roles/{role_id}` · action `users.environment_roles.get`
        * @scope `roles:read`
+       * @danger read
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       get: <O extends CallOptions = CallOptions>(id: string, roleId: string, query?: UsersEnvironmentRolesGetQuery, options?: O): Promise<Outcome<UsersEnvironmentRolesGetResponse, O>> =>
@@ -6327,6 +6362,7 @@ export class EnvironmentClient {
        *
        * `PUT /users/{id}/environment-roles/{role_id}` · action `users.environment_roles.grant`
        * @scope `roles:write`
+       * @danger critical
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       grant: <O extends CallOptions = CallOptions>(id: string, roleId: string, query?: UsersEnvironmentRolesGrantQuery, options?: O): Promise<Outcome<UsersEnvironmentRolesGrantResponse, O>> =>
@@ -6338,6 +6374,7 @@ export class EnvironmentClient {
        *
        * `GET /users/{id}/environment-roles` · action `users.environment_roles.list`
        * @scope `roles:read`
+       * @danger read
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       list: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<UsersEnvironmentRolesListResponse, O>> =>
@@ -6349,6 +6386,7 @@ export class EnvironmentClient {
        *
        * `DELETE /users/{id}/environment-roles/{role_id}` · action `users.environment_roles.revoke`
        * @scope `roles:write`
+       * @danger destructive
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       revoke: <O extends CallOptions = CallOptions>(id: string, roleId: string, query?: UsersEnvironmentRolesRevokeQuery, options?: O): Promise<Outcome<UsersEnvironmentRolesRevokeResponse, O>> =>
@@ -6406,6 +6444,7 @@ export class EnvironmentClient {
        *
        * `GET /users/{id}/sessions` · action `users.sessions.list`
        * @scope `users:read`
+       * @danger read
        * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
        */
       list: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<UsersSessionsListResponse, O>> =>
