@@ -1,6 +1,6 @@
 {
   "name": "@cboxdk/id-js",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "description": "Turnkey Cbox ID client for JavaScript/TypeScript — OpenID Connect login (PKCE + id_token verification via JWKS), hosted profile-management redirect, machine tokens, UserInfo, RFC 7662 introspection, and webhook signature verification. Runs on Node, edge, and the browser, with a first-class Next.js adapter.",
   "type": "module",
   "license": "MIT",
@@ -42,6 +42,11 @@
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js",
       "require": "./dist/server.cjs"
+    },
+    "./management": {
+      "types": "./dist/management.d.ts",
+      "import": "./dist/management.js",
+      "require": "./dist/management.cjs"
     }
   },
   "files": [
@@ -49,6 +54,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "generate": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/generate-management.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -72,7 +78,8 @@
     "react-dom": "^19.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.9.2",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.0",
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": ">=20"
