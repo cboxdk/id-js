@@ -399,6 +399,19 @@ class Generator {
       for (const op of actions) op.name = op.name.slice(1);
     }
 
+    // An action can be both a method and the namespace of another: `fga.check` and
+    // `fga.check.batch`. A member cannot be both, so the deeper one folds its last two
+    // segments together — `fga.checkBatch()` next to `fga.check()`.
+    const leaves = new Set(ops.map((o) => o.name.join('.')));
+
+    for (const op of ops) {
+      while (op.name.length > 2 && leaves.has(op.name.slice(0, -1).join('.'))) {
+        const leaf = op.name.pop()!;
+        const parent = op.name.pop()!;
+        op.name.push(`${parent}_${leaf}`);
+      }
+    }
+
     return ops.sort((a, b) => a.name.join('.').localeCompare(b.name.join('.')));
   }
 

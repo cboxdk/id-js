@@ -51,6 +51,17 @@ export interface ManifestSync {
   orphaned_permission_keys: string[];
 }
 
+export interface SmsFactorPolicy {
+  /** Text-message codes are accepted as a second factor. Off by default. */
+  enabled: boolean;
+  /** ISO 3166-1 alpha-2 countries whose numbers may enrol and be texted. Re-checked at every send. */
+  allowed_countries: string[];
+  /** Administrators may add SMS only beside an authenticator app or a passkey. */
+  privileged_need_stronger_factor: boolean;
+  /** The deployment's ceiling (CBOX_ID_SMS_ALLOWED_COUNTRIES). Empty: no deployment restriction. A listed country outside it is never texted. */
+  deployment_countries: string[];
+}
+
 export interface SelfServiceSignup {
   enabled: boolean;
   /** False on a single-tenant install, where sign-up follows CBOX_ID_SIGNUP_MODE and the switch changes nothing. */
@@ -767,8 +778,14 @@ export interface PortalLink {
   organization_id: string;
   /** What the link may set up. */
   intents: Array<'sso' | 'dsync' | 'domain_verification' | 'log_streams' | 'certificate_renewal' | 'audit_logs'>;
-  /** The address the link was mailed to, or null when it was not sent. */
+  /** The address the link was mailed to, or null when it was not sent — none was asked for, or the mail was suppressed (see email_suppressed). */
   emailed_to: string | null;
+  /**
+   * True when an `email` was asked for and NOT sent because this is a sandbox
+   * environment, which sends no mail. `emailed_to` is then null, and the `url` in this
+   * answer is the only way to the link — share it yourself.
+   */
+  email_suppressed: boolean;
   /**
    * The one-time setup link — the whole credential. Shown once; `null` on an
    * idempotent replay of this answer.
@@ -887,11 +904,187 @@ export interface AuditLogExport {
   expires_at: string | null;
 }
 
+export interface FgaSubject {
+  /** The subject's type: `user`, or `group` for a userset. */
+  type: string;
+  id: string;
+  /** For a userset — everybody with this relation on the subject (`member` of `group:eng`). null for one subject. */
+  relation: string | null;
+}
+
+export interface FgaTuple {
+  resource_type: string;
+  resource_id: string;
+  relation: string;
+  subject: FgaSubject;
+  /** The same tuple in the notation: `document:readme#viewer@group:eng#member`. */
+  tuple: string;
+}
+
+export interface FgaSchema {
+  /** false until a schema is first saved. */
+  defined: boolean;
+  /** The source as it was written, comments and all. */
+  schema: string | null;
+  /** How many times the schema has been replaced. */
+  version: number;
+  /** The parsed types, each with its relations and how each is decided. */
+  types: FgaType[];
+  updated_at: string | null;
+  /** The revision the model is at. */
+  consistency_token: string;
+}
+
+export interface FgaType {
+  name: string;
+  relations: Array<{
+    name: string;
+    /**
+     * How the relation is decided, as a tree of one-key objects: `direct` (a list of
+     * `{type, relation?}`), `computed` (a relation name), `from` (`{tupleset, relation}`),
+     * `union` and `intersection` (lists of rewrites), `exclusion` (`{base, subtract}`).
+     */
+    rewrite: Record<string, unknown>;
+    /** The subjects a tuple may name on this relation; empty for a relation that is only computed. */
+    directly_related: Array<{
+      type: string;
+      relation?: string;
+    }>;
+  }>;
+}
+
+export interface FgaSchemaValidation {
+  valid: boolean;
+  errors: Array<{
+    /** 0 when the problem is about the whole schema. */
+    line: number;
+    message: string;
+  }>;
+  types: FgaType[];
+  /** The schema as the platform prints it, when valid. */
+  canonical: string | null;
+}
+
+export interface FgaTupleWrite {
+  /** Tuples that were new. Re-writing an existing one is not counted. */
+  written: number;
+  /** Tuples that were there to delete. */
+  deleted: number;
+  /** Pass to a check that must see this write. */
+  consistency_token: string;
+}
+
+export interface FgaCheck {
+  allowed: boolean;
+  resource_type: string;
+  resource_id: string;
+  relation: string;
+  subject: FgaSubject;
+  /** The revision the answer was decided at. */
+  consistency_token: string;
+}
+
+export interface FgaCheckBatch {
+  /** One answer per check, in the order asked. */
+  results: FgaCheck[];
+  consistency_token: string | null;
+}
+
+export interface FgaObject {
+  type: string;
+  id: string;
+}
+
 export interface AuditLogSettings {
   /** Events are kept this many days after they arrive. */
   retention_days: number;
   /** Whether an action with no schema is refused. */
   strict_schemas: boolean;
+}
+
+export interface RadarSettings {
+  /** monitor records every verdict and acts on none; enforce blocks and challenges. */
+  mode: 'monitor' | 'enforce';
+  /** True while the environment follows the deployment's default (RISK_MODE) rather than a mode it chose. */
+  mode_inherited: boolean;
+  deployment_mode: 'monitor' | 'enforce';
+  /** The configured IP intelligence source. With none, country, network and travel facts are unknown and the rules on them never fire. */
+  ip_intelligence: 'none' | 'maxmind' | 'ipinfo';
+  builtin_rules: Array<{
+    key: 'credential_stuffing' | 'bot_velocity' | 'account_attack' | 'impossible_travel' | 'new_device' | 'anonymous_network' | 'hosting_network' | 'disposable_email' | 'risk_score_reject' | 'risk_score_elevated';
+    name: string;
+    description: string;
+    applies_to: 'all' | 'sign_in' | 'sign_up';
+    enabled: boolean;
+    action: 'allow' | 'challenge' | 'block';
+    /** null for a rule that counts nothing. */
+    threshold: number | null;
+    threshold_unit: string | null;
+    threshold_min: number | null;
+    threshold_max: number | null;
+  }>;
+}
+
+export interface RadarRule {
+  id: string;
+  name: string;
+  description: string | null;
+  /** 1 is evaluated first; the first rule whose conditions all hold decides. */
+  position: number;
+  enabled: boolean;
+  applies_to: 'all' | 'sign_in' | 'sign_up';
+  action: 'allow' | 'challenge' | 'block';
+  conditions: Array<{
+    field: string;
+    operator: 'eq' | 'neq' | 'in' | 'not_in' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'in_cidr' | 'not_in_cidr';
+    /** Normalised: a string, a number, true/false, or a list for the list operators. */
+    value: string | number | boolean | Array<string | number>;
+  }>;
+  /** The conditions as a person reads them. */
+  summary: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RadarListEntry {
+  id: string;
+  list: 'allow' | 'deny';
+  kind: 'ip' | 'email' | 'email_domain' | 'device';
+  /** Normalised: an IP or CIDR range, a lower-case address or domain, or a device id. */
+  value: string;
+  note: string | null;
+  expires_at: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface RadarDecision {
+  id: string;
+  assessed_at: string;
+  flow: 'sign_in' | 'sign_up';
+  method: 'password' | 'magic_link' | 'passkey' | 'sign_up' | null;
+  verdict: 'allow' | 'challenge' | 'block';
+  /** Whether the verdict was acted on; false under monitor. */
+  enforced: boolean;
+  mode: 'monitor' | 'enforce';
+  /** What decided it: deny_list:<kind>, allow_list:<kind>, rule:<id>, builtin:<key>; null when nothing matched. */
+  rule: string | null;
+  rule_name: string | null;
+  /** Every rule that fired, the deciding one included. */
+  triggered: Array<{
+    rule: string;
+    name: string;
+  }>;
+  reasons: string[];
+  risk_score: number;
+  risk_outcome: 'allow' | 'flag' | 'challenge' | 'step_up' | 'reject';
+  country: string | null;
+  asn: number | null;
+  email_domain: string | null;
+  /** The device id (a pseudonym of the device cookie), for a returning device. */
+  device: string | null;
+  /** The facts the rules were evaluated on — never the IP, the address or the user agent. */
+  facts: Record<string, unknown>;
 }
 
 export interface AuditLogVerification {
@@ -913,15 +1106,41 @@ export interface Directory {
   id: string;
   organization_id: string;
   name: string;
-  provider: 'scim' | 'google_workspace' | 'microsoft_entra';
+  provider: 'scim' | 'google_workspace' | 'microsoft_entra' | 'workday' | 'bamboohr' | 'rippling' | 'hibob' | 'personio';
   /** true when this platform fetches from the provider; false for a SCIM endpoint the provider posts to. */
   pull: boolean;
+  /** true for an HR system (Workday, BambooHR, Rippling, HiBob, Personio): employment dates decide access and departments become groups. */
+  hris?: boolean;
   active: boolean;
   status: 'active' | 'paused';
   /** Where the identity provider sends SCIM requests. null for a pull directory. */
   scim_base_url?: string | null;
   last_synced_at?: string | null;
+  /** Why the last pull failed, or for a partial one how many records could not be synced and the first reason. Never names a person. */
   last_sync_error?: string | null;
+  /** When the last pull started. null for a SCIM directory. */
+  last_sync_started_at?: string | null;
+  /** How the last pull went. partial: the provider answered but some records could not be reconciled, or a mass deprovisioning was refused. */
+  last_sync_status?: 'running' | 'succeeded' | 'partial' | 'failed' | null;
+  /** The last pull's counts, and up to 50 records it could not reconcile — by the provider's own id, never by name or email. */
+  last_sync_stats?: {
+    mode?: 'full' | 'incremental';
+    provisioned?: number;
+    deprovisioned?: number;
+    groups?: number;
+    /** Leavers and people who have not started, who never had an account. */
+    skipped?: number;
+    failed?: number;
+    failures?: Array<{
+      external_id?: string | null;
+      reason?: string;
+    }>;
+  } | null;
+  /** Minutes between scheduled pulls. null for a SCIM directory. */
+  sync_interval_minutes?: number | null;
+  next_sync_at?: string | null;
+  /** HR systems only: the HR system's own field names copied onto each person. */
+  custom_attributes?: string[] | null;
   created_at?: string | null;
   /**
    * The SCIM bearer token, on the create and rotate answers only — shown once, never
@@ -967,6 +1186,47 @@ export interface SodPolicy {
   role_ids: string[];
   active: boolean;
   created_at?: string | null;
+}
+
+/** A switch apps ask about per user and organization. First match wins: switched off, then a user rule, then an organization rule, then the rollout, then the default. */
+export interface FeatureFlag {
+  id: string;
+  /** What code asks for and the `feature_flags` claim carries. Fixed once created. */
+  key: string;
+  description?: string | null;
+  /** The kill switch: false is off for everyone. */
+  enabled: boolean;
+  /** The answer when no rule matches. */
+  default_value: boolean;
+  /** On for this share of everyone else, by a stable hash of the user id (the organization id without one). */
+  rollout_percentage?: number | null;
+  /** Rules for named users; they outrank every other rule. */
+  users: FeatureFlagRule[];
+  /** Rules for named organizations; they outrank the rollout and the default. */
+  organizations: FeatureFlagRule[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface FeatureFlagRule {
+  /** The user's or organization's id. */
+  id: string;
+  /** On or off for them. */
+  enabled: boolean;
+}
+
+/** Every flag's answer for the user and organization asked about. */
+export interface FeatureFlagEvaluation {
+  user_id: string | null;
+  organization_id: string | null;
+  /** The keys of the flags that are on, sorted — exactly what the token's `feature_flags` claim would carry. */
+  feature_flags: string[];
+  evaluations: Array<{
+    key: string;
+    enabled: boolean;
+    /** The rule that decided. */
+    reason: 'disabled' | 'user_target' | 'organization_target' | 'rollout' | 'default';
+  }>;
 }
 
 export interface AccessReview {
@@ -1019,6 +1279,61 @@ export interface TokenVaultSecret {
   created_at?: string | null;
   /** The OAuth client ids that may lease it. Not on lists. */
   grants?: string[];
+}
+
+/** A pipe: this environment's OAuth app at a third-party provider, through which people connect their own accounts. The client secret is write-only. */
+export interface Pipe {
+  id: string;
+  provider: 'github' | 'google' | 'microsoft' | 'slack' | 'salesforce' | 'hubspot' | 'linear' | 'notion';
+  name: string;
+  /** Your app's OAuth client id at the provider. */
+  client_id: string;
+  /** What people are asked for when they connect. */
+  scopes: string[];
+  /** Per-installation values: Microsoft's `tenant`, Salesforce's `domain`. */
+  parameters?: {
+    [key: string]: string;
+  };
+  enabled: boolean;
+  /** The callback URL to register at the provider. */
+  redirect_uri: string;
+  /** The OAuth client ids of the apps that may lease its tokens. */
+  grants: string[];
+  /** How many people have connected an account through it. */
+  connections: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+/** One person's connected account at a pipe's provider. Never a token. */
+export interface PipeConnection {
+  id: string;
+  pipe_id: string;
+  provider: string;
+  user_id: string;
+  status: 'active' | 'needs_reauth';
+  /** The account's name at the provider, when it says (a GitHub login, an email, a workspace). */
+  account?: string | null;
+  scopes: string[];
+  metadata?: {
+    [key: string]: string;
+  };
+  /** When the current access token expires. Null when it does not. */
+  expires_at?: string | null;
+  connected_at?: string | null;
+  last_refreshed_at?: string | null;
+  /** Consecutive transient refresh failures. */
+  refresh_failures?: number;
+  last_error?: string | null;
+  /** Why it needs reconnecting: the provider's error code, or `no_refresh_token`. */
+  reauth_reason?: string | null;
+}
+
+export interface PipeConnectRequired {
+  error: 'not_connected' | 'reauthorization_required';
+  message: string;
+  /** Where to send the person to connect. Add `?client_id=…&return_to=…` to bring them back to your app. */
+  connect_url: string;
 }
 
 /** A pending request from an agent to act as one of this environment's people (OIDC CIBA). */
@@ -1771,6 +2086,34 @@ export type DirectoriesCreateResponse = {
   data: Directory;
 };
 
+/** Request body of `directories.credentials.replace`. */
+export interface DirectoriesCredentialsReplaceBody {
+  /** Only if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+  /** The new credentials, in the keys the provider's setup names (Google: service_account_json, admin_email; Entra: tenant_id, client_id, client_secret). Write-only. */
+  credentials: {
+    report_url?: string;
+    username?: string;
+    password?: string;
+    client_id?: string;
+    client_secret?: string;
+    refresh_token?: string;
+    subdomain?: string;
+    api_key?: string;
+    api_token?: string;
+    service_user_id?: string;
+    service_user_token?: string;
+    service_account_json?: string;
+    admin_email?: string;
+    tenant_id?: string;
+  };
+}
+
+/** Response body of `directories.credentials.replace`. */
+export type DirectoriesCredentialsReplaceResponse = {
+  data: Directory;
+};
+
 /** Request body of `directories.delete`. */
 export interface DirectoriesDeleteBody {
   /** Only if it is this organization's; anything else is a 404. */
@@ -1824,6 +2167,50 @@ export type DirectoriesGroupsMapResponse = {
   data: DirectoryGroup;
 };
 
+/** Request body of `directories.hris.connect`. */
+export interface DirectoriesHrisConnectBody {
+  /** The organization whose people it provisions. */
+  organization_id: string;
+  /** workday, bamboohr, rippling, hibob or personio. */
+  provider: 'workday' | 'bamboohr' | 'rippling' | 'hibob' | 'personio';
+  /** What administrators call it. Defaults to the HR system's name. */
+  name?: string;
+  /** The HR system's credentials, in the keys its setup guide names. Write-only: sealed, never returned. */
+  credentials: {
+    /** Workday: Report web-service URL. */
+    report_url?: string;
+    /** Workday: Integration system user. */
+    username?: string;
+    /** Workday: Integration system user password (secret). */
+    password?: string;
+    /** Workday: API client ID; Personio: Client ID. */
+    client_id?: string;
+    /** Workday: API client secret (secret); Personio: Client secret (secret). */
+    client_secret?: string;
+    /** Workday: Refresh token (secret). */
+    refresh_token?: string;
+    /** BambooHR: Company subdomain. */
+    subdomain?: string;
+    /** BambooHR: API key (secret). */
+    api_key?: string;
+    /** Rippling: API token (secret). */
+    api_token?: string;
+    /** HiBob: Service user ID. */
+    service_user_id?: string;
+    /** HiBob: Service user token (secret). */
+    service_user_token?: string;
+  };
+  /** The HR system's own field names to copy onto each person, verbatim. */
+  custom_attributes?: string[];
+  /** Minutes between scheduled pulls, 15 to 1440. Omitted or null: the platform default (hourly). */
+  sync_interval_minutes?: number | null;
+}
+
+/** Response body of `directories.hris.connect`. */
+export type DirectoriesHrisConnectResponse = {
+  data: Directory;
+};
+
 /** Query parameters of `directories.list`. */
 export interface DirectoriesListQuery {
   /** Only this organization's. */
@@ -1850,6 +2237,61 @@ export interface DirectoriesStatusSetBody {
 
 /** Response body of `directories.status.set`. */
 export type DirectoriesStatusSetResponse = {
+  data: Directory;
+};
+
+/** Request body of `directories.sync`. */
+export interface DirectoriesSyncBody {
+  /** Only if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+  /** Ask an HR system that syncs incrementally for everybody, not only what changed. Ignored by other providers. */
+  full?: boolean;
+}
+
+/** Response body of `directories.sync`. */
+export type DirectoriesSyncResponse = void;
+
+/** Request body of `directories.sync_settings.update`. */
+export interface DirectoriesSyncSettingsUpdateBody {
+  /** Only if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+  /** Minutes between scheduled pulls, 15 to 1440. null returns to the platform default (hourly). */
+  sync_interval_minutes?: number | null;
+  /** HR systems only: the HR system's own field names to copy onto each person, verbatim. */
+  custom_attributes?: string[];
+  /** Workday only: the report column holding each field, where it is not the default name. */
+  field_map?: {
+    /** The report column holding id. Default: Employee_ID. */
+    id?: string;
+    /** The report column holding email. Default: Work_Email. */
+    email?: string;
+    /** The report column holding first_name. Default: Legal_First_Name. */
+    first_name?: string;
+    /** The report column holding last_name. Default: Legal_Last_Name. */
+    last_name?: string;
+    /** The report column holding display_name. Default: Preferred_Name. */
+    display_name?: string;
+    /** The report column holding active. Default: Active_Status. */
+    active?: string;
+    /** The report column holding on_leave. Default: On_Leave. */
+    on_leave?: string;
+    /** The report column holding hire_date. Default: Hire_Date. */
+    hire_date?: string;
+    /** The report column holding termination_date. Default: Termination_Date. */
+    termination_date?: string;
+    /** The report column holding department_id. Default: Supervisory_Organization_ID. */
+    department_id?: string;
+    /** The report column holding department. Default: Supervisory_Organization. */
+    department?: string;
+    /** The report column holding manager_id. Default: Manager_Employee_ID. */
+    manager_id?: string;
+    /** The report column holding title. Default: Business_Title. */
+    title?: string;
+  };
+}
+
+/** Response body of `directories.sync_settings.update`. */
+export type DirectoriesSyncSettingsUpdateResponse = {
   data: Directory;
 };
 
@@ -1917,6 +2359,297 @@ export interface EventsListQuery {
 export type EventsListResponse = {
   data: DomainEvent[];
   meta: PageMeta;
+};
+
+/** Request body of `feature_flags.create`. */
+export interface FeatureFlagsCreateBody {
+  /** What code asks for and the `feature_flags` claim carries: lowercase letters and digits, with `-`, `_` or `.` between them. Fixed once created. */
+  key: string;
+  description?: string | null;
+  /** The kill switch: off means off for everyone, whatever the rules say. Defaults to true. */
+  enabled?: boolean;
+  /** The answer when no rule matches. Defaults to false. */
+  default_value?: boolean;
+  /** Rules for named users — they outrank every other rule. The COMPLETE list when sent. */
+  users?: Array<{
+    /** The user's id. */
+    id: string;
+    /** On (true, the default) or off for them, whatever the organization, rollout or default say. */
+    enabled?: boolean;
+  }>;
+  /** Rules for named organizations — they outrank the rollout and the default. The COMPLETE list when sent. */
+  organizations?: Array<{
+    /** The organization's id. */
+    id: string;
+    /** On (true, the default) or off for them, whatever the organization, rollout or default say. */
+    enabled?: boolean;
+  }>;
+  /** On for this percentage of everyone else, by a stable hash of the user id (or the organization id without one). null for no rollout. */
+  rollout_percentage?: number | null;
+}
+
+/** Response body of `feature_flags.create`. */
+export type FeatureFlagsCreateResponse = {
+  data: FeatureFlag;
+};
+
+/** Response body of `feature_flags.delete`. */
+export type FeatureFlagsDeleteResponse = void;
+
+/** Query parameters of `feature_flags.evaluate`. */
+export interface FeatureFlagsEvaluateQuery {
+  /** The user to evaluate for. Left out, only organization rules, an organization-bucketed rollout and defaults apply. */
+  user_id?: string;
+  /** The organization the question is asked in. */
+  organization_id?: string;
+}
+
+/** Response body of `feature_flags.evaluate`. */
+export type FeatureFlagsEvaluateResponse = {
+  data: FeatureFlagEvaluation;
+};
+
+/** Response body of `feature_flags.get`. */
+export type FeatureFlagsGetResponse = {
+  data: FeatureFlag;
+};
+
+/** Query parameters of `feature_flags.list`. */
+export interface FeatureFlagsListQuery {
+  /** Items per page, 1–100. Default 50. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `feature_flags.list`. */
+export type FeatureFlagsListResponse = {
+  data: FeatureFlag[];
+  meta: PageMeta;
+};
+
+/** Request body of `feature_flags.update`. */
+export interface FeatureFlagsUpdateBody {
+  /** Null or empty clears it. */
+  description?: string | null;
+  /** The kill switch: off means off for everyone. */
+  enabled?: boolean;
+  /** The answer when no rule matches. */
+  default_value?: boolean;
+  /** Rules for named users — they outrank every other rule. The COMPLETE list when sent. */
+  users?: Array<{
+    /** The user's id. */
+    id: string;
+    /** On (true, the default) or off for them, whatever the organization, rollout or default say. */
+    enabled?: boolean;
+  }>;
+  /** Rules for named organizations — they outrank the rollout and the default. The COMPLETE list when sent. */
+  organizations?: Array<{
+    /** The organization's id. */
+    id: string;
+    /** On (true, the default) or off for them, whatever the organization, rollout or default say. */
+    enabled?: boolean;
+  }>;
+  /** On for this percentage of everyone else, by a stable hash of the user id (or the organization id without one). null for no rollout. */
+  rollout_percentage?: number | null;
+}
+
+/** Response body of `feature_flags.update`. */
+export type FeatureFlagsUpdateResponse = {
+  data: FeatureFlag;
+};
+
+/** Query parameters of `fga.check`. */
+export interface FgaCheckQuery {
+  /** The resource's type: `document`. */
+  resource_type: string;
+  /** The resource's id: `readme`. */
+  resource_id: string;
+  /** The relation to check: `viewer`. */
+  relation: string;
+  /** The subject's type: `user`, or `group` for a userset. */
+  subject_type: string;
+  /** The subject's id: `alice`. */
+  subject_id: string;
+  /** For a userset subject — `member` with `group`/`eng` asks about every member of eng. */
+  subject_relation?: string;
+  /** A `consistency_token` a write returned: the answer is then at least as fresh as that write. */
+  consistency_token?: string | null;
+}
+
+/** Response body of `fga.check`. */
+export type FgaCheckResponse = {
+  data: FgaCheck;
+};
+
+/** Query parameters of `fga.check_batch`. */
+export interface FgaCheckBatchQuery {
+  /** 1–100 checks, each `resource_type:resource_id#relation@subject_type:subject_id[#subject_relation]`. */
+  checks: string[];
+  /** A `consistency_token` a write returned: the answer is then at least as fresh as that write. */
+  consistency_token?: string | null;
+}
+
+/** Response body of `fga.check_batch`. */
+export type FgaCheckBatchResponse = {
+  data: FgaCheckBatch;
+};
+
+/** Query parameters of `fga.resources.list`. */
+export interface FgaResourcesListQuery {
+  /** Which type of resource to list: `document`. */
+  resource_type: string;
+  /** The relation the subject must have: `viewer`. */
+  relation: string;
+  /** The subject's type: `user`. */
+  subject_type: string;
+  /** The subject's id: `alice`. */
+  subject_id: string;
+  /** For a userset subject: `member` with `group`/`eng`. */
+  subject_relation?: string;
+  /** A `consistency_token` a write returned: the answer is then at least as fresh as that write. */
+  consistency_token?: string | null;
+  /** Ids per page, 1–1000. Default 100. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `fga.resources.list`. */
+export type FgaResourcesListResponse = {
+  data: FgaObject[];
+  meta: PageMeta;
+};
+
+/** Response body of `fga.schema.get`. */
+export type FgaSchemaGetResponse = {
+  data: FgaSchema;
+};
+
+/** Request body of `fga.schema.update`. */
+export interface FgaSchemaUpdateBody {
+  /** The schema, in the schema language: `type document` then `  relation viewer: [user, group#member] or editor or viewer from parent`. */
+  schema: string;
+}
+
+/** Response body of `fga.schema.update`. */
+export type FgaSchemaUpdateResponse = {
+  data: FgaSchema;
+};
+
+/** Query parameters of `fga.schema.validate`. */
+export interface FgaSchemaValidateQuery {
+  /** The schema to check, in the schema language. */
+  schema: string;
+}
+
+/** Response body of `fga.schema.validate`. */
+export type FgaSchemaValidateResponse = {
+  data: FgaSchemaValidation;
+};
+
+/** Query parameters of `fga.subjects.list`. */
+export interface FgaSubjectsListQuery {
+  /** The resource's type: `document`. */
+  resource_type: string;
+  /** The resource's id: `readme`. */
+  resource_id: string;
+  /** The relation: `viewer`. */
+  relation: string;
+  /** Which type of subject to list: `user`. */
+  subject_type: string;
+  /** A `consistency_token` a write returned: the answer is then at least as fresh as that write. */
+  consistency_token?: string | null;
+  /** Ids per page, 1–1000. Default 100. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `fga.subjects.list`. */
+export type FgaSubjectsListResponse = {
+  data: FgaObject[];
+  meta: PageMeta;
+};
+
+/** Request body of `fga.tuples.delete`. */
+export interface FgaTuplesDeleteBody {
+  /** 1–100 tuples to delete, all together or none. */
+  tuples: Array<{
+    /** The resource's type, as the schema names it: `document`. */
+    resource_type: string;
+    /** Your id for the resource: `readme`. */
+    resource_id: string;
+    /** The relation: `viewer`. */
+    relation: string;
+    /** Who: one subject (`user:alice`), or a userset (`group:eng#member`). */
+    subject: {
+      /** The subject's type: `user`, or `group` for a userset. */
+      type: string;
+      /** Your id for the subject: `alice`, `eng`. */
+      id: string;
+      /** For a userset — everybody with this relation on the subject: `member` of `group:eng`. Omit for one subject. */
+      relation?: string | null;
+    };
+  }>;
+}
+
+/** Response body of `fga.tuples.delete`. */
+export type FgaTuplesDeleteResponse = {
+  data: FgaTupleWrite;
+};
+
+/** Query parameters of `fga.tuples.list`. */
+export interface FgaTuplesListQuery {
+  /** Only tuples on this resource type. */
+  resource_type?: string;
+  /** Only tuples on this resource. */
+  resource_id?: string;
+  /** Only tuples of this relation. */
+  relation?: string;
+  /** Only tuples naming this subject type. */
+  subject_type?: string;
+  /** Only tuples naming this subject. */
+  subject_id?: string;
+  /** Only tuples naming a userset with this relation. */
+  subject_relation?: string;
+  /** Tuples per page, 1–100. Default 50. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `fga.tuples.list`. */
+export type FgaTuplesListResponse = {
+  data: FgaTuple[];
+  meta: PageMeta;
+};
+
+/** Request body of `fga.tuples.write`. */
+export interface FgaTuplesWriteBody {
+  /** 1–100 tuples to write, all together or none. */
+  tuples: Array<{
+    /** The resource's type, as the schema names it: `document`. */
+    resource_type: string;
+    /** Your id for the resource: `readme`. */
+    resource_id: string;
+    /** The relation: `viewer`. */
+    relation: string;
+    /** Who: one subject (`user:alice`), or a userset (`group:eng#member`). */
+    subject: {
+      /** The subject's type: `user`, or `group` for a userset. */
+      type: string;
+      /** Your id for the subject: `alice`, `eng`. */
+      id: string;
+      /** For a userset — everybody with this relation on the subject: `member` of `group:eng`. Omit for one subject. */
+      relation?: string | null;
+    };
+  }>;
+}
+
+/** Response body of `fga.tuples.write`. */
+export type FgaTuplesWriteResponse = {
+  data: FgaTupleWrite;
 };
 
 /** Request body of `frontend_keys.create`. */
@@ -2526,6 +3259,109 @@ export type PermissionsUpdateResponse = {
   data: Permission;
 };
 
+/** Response body of `pipes.connections.delete`. */
+export type PipesConnectionsDeleteResponse = void;
+
+/** Query parameters of `pipes.connections.list`. */
+export interface PipesConnectionsListQuery {
+  /** Only this person's connection. */
+  user_id?: string;
+  /** Items per page, 1–100. Default 50. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `pipes.connections.list`. */
+export type PipesConnectionsListResponse = {
+  data: PipeConnection[];
+  meta: PageMeta;
+};
+
+/** Request body of `pipes.create`. */
+export interface PipesCreateBody {
+  /** The provider's key. */
+  provider: 'github' | 'google' | 'microsoft' | 'slack' | 'salesforce' | 'hubspot' | 'linear' | 'notion';
+  /** The OAuth client id of your app at the provider. */
+  client_id: string;
+  /** Its client secret. Write-only: sealed, never returned. */
+  client_secret: string;
+  /** The OAuth scopes to ask people for. Left out: the provider's defaults. */
+  scopes?: string[];
+  /** Per-installation values some providers need. Left out: the provider's defaults. */
+  parameters?: {
+    /** Microsoft 365 only: `common` (default), `organizations`, or one directory's tenant id or domain. */
+    tenant?: string;
+    /** Salesforce only: `login.salesforce.com` (default), `test.salesforce.com`, or your My Domain host. */
+    domain?: string;
+  };
+}
+
+/** Response body of `pipes.create`. */
+export type PipesCreateResponse = {
+  data: Pipe;
+};
+
+/** Response body of `pipes.delete`. */
+export type PipesDeleteResponse = void;
+
+/** Response body of `pipes.get`. */
+export type PipesGetResponse = {
+  data: Pipe;
+};
+
+/** Request body of `pipes.grants.create`. */
+export interface PipesGrantsCreateBody {
+  /** The OAuth client id of an app in this environment. */
+  client_id: string;
+}
+
+/** Response body of `pipes.grants.create`. */
+export type PipesGrantsCreateResponse = {
+  data: Pipe;
+};
+
+/** Response body of `pipes.grants.delete`. */
+export type PipesGrantsDeleteResponse = void;
+
+/** Query parameters of `pipes.list`. */
+export interface PipesListQuery {
+  /** Items per page, 1–100. Default 50. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `pipes.list`. */
+export type PipesListResponse = {
+  data: Pipe[];
+  meta: PageMeta;
+};
+
+/** Request body of `pipes.update`. */
+export interface PipesUpdateBody {
+  /** A new OAuth client id. Left out, unchanged. */
+  client_id?: string;
+  /** A new client secret, sealed. Left out, unchanged. */
+  client_secret?: string;
+  /** The OAuth scopes to ask people for. Left out: the provider's defaults. */
+  scopes?: string[];
+  /** Per-installation values some providers need. Left out: the provider's defaults. */
+  parameters?: {
+    /** Microsoft 365 only: `common` (default), `organizations`, or one directory's tenant id or domain. */
+    tenant?: string;
+    /** Salesforce only: `login.salesforce.com` (default), `test.salesforce.com`, or your My Domain host. */
+    domain?: string;
+  };
+  /** False refuses new connections and every lease. Left out, unchanged. */
+  enabled?: boolean;
+}
+
+/** Response body of `pipes.update`. */
+export type PipesUpdateResponse = {
+  data: Pipe;
+};
+
 /** Request body of `provisioning.targets.create`. */
 export interface ProvisioningTargetsCreateBody {
   /** The organization the target belongs to. Send this or environment_wide. */
@@ -2600,6 +3436,207 @@ export interface ProvisioningTargetsStatusSetBody {
 /** Response body of `provisioning.targets.status.set`. */
 export type ProvisioningTargetsStatusSetResponse = {
   data: ProvisioningTarget;
+};
+
+/** Response body of `radar.decisions.get`. */
+export type RadarDecisionsGetResponse = {
+  data: RadarDecision;
+};
+
+/** Query parameters of `radar.decisions.list`. */
+export interface RadarDecisionsListQuery {
+  /** `allow`, `challenge` or `block`. */
+  verdict?: 'allow' | 'challenge' | 'block';
+  /** `sign_in` or `sign_up`. */
+  flow?: 'sign_in' | 'sign_up';
+  /** A rule key — `builtin:credential_stuffing`, `rule:<id>`, `deny_list:ip` — that decided or fired. */
+  rule?: string;
+  /** Two-letter country code. */
+  country?: string;
+  /** Attempts with this address (matched by pseudonym). */
+  email?: string;
+  /** Attempts from this IP (matched by pseudonym). */
+  ip?: string;
+  /** Attempts from this device id. */
+  device?: string;
+  /** Only decisions that were (true) or were not (false) acted on. */
+  enforced?: boolean;
+  /** On or after this time (ISO 8601). */
+  from?: string;
+  /** On or before this time (ISO 8601). */
+  to?: string;
+  /** Decisions per page, 1–100. Default 50. */
+  limit?: number;
+  /** The `next_cursor` of the previous page: the decisions older than it. */
+  after?: string;
+}
+
+/** Response body of `radar.decisions.list`. */
+export type RadarDecisionsListResponse = {
+  data: RadarDecision[];
+  meta: PageMeta;
+};
+
+/** Request body of `radar.lists.add`. */
+export interface RadarListsAddBody {
+  /** `allow` or `deny`. */
+  list: 'allow' | 'deny';
+  /** `ip` (an address or CIDR range), `email`, `email_domain` or `device`. */
+  kind: 'ip' | 'email' | 'email_domain' | 'device';
+  /** The IP, range, address, domain or device id. */
+  value: string;
+  /** Why it is listed. */
+  note?: string | null;
+  /** When the entry stops applying (ISO 8601). Never, when omitted. */
+  expires_at?: string | null;
+}
+
+/** Response body of `radar.lists.add`. */
+export type RadarListsAddResponse = {
+  data: RadarListEntry;
+};
+
+/** Query parameters of `radar.lists.list`. */
+export interface RadarListsListQuery {
+  /** `allow` or `deny`; both when omitted. */
+  list?: 'allow' | 'deny';
+  /** Only entries of this kind. */
+  kind?: 'ip' | 'email' | 'email_domain' | 'device';
+  /** Items per page, 1–100. Default 50. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `radar.lists.list`. */
+export type RadarListsListResponse = {
+  data: RadarListEntry[];
+  meta: PageMeta;
+};
+
+/** Response body of `radar.lists.remove`. */
+export type RadarListsRemoveResponse = void;
+
+/** Request body of `radar.mode.set`. */
+export interface RadarModeSetBody {
+  /** `monitor` or `enforce`. */
+  mode: 'monitor' | 'enforce';
+}
+
+/** Response body of `radar.mode.set`. */
+export type RadarModeSetResponse = {
+  data: RadarSettings;
+};
+
+/** Request body of `radar.rules.create`. */
+export interface RadarRulesCreateBody {
+  /** What the rule is for, as the console lists it. */
+  name: string;
+  /** Why the rule exists, for whoever reads it next. */
+  description?: string | null;
+  /** What happens when every condition holds: `allow` (skip every rule after this one), `challenge` (a second factor on sign-in; a CAPTCHA or an emailed code on sign-up) or `block`. */
+  action: 'allow' | 'challenge' | 'block';
+  /** `all` (the default), `sign_in` or `sign_up`. */
+  applies_to?: 'all' | 'sign_in' | 'sign_up';
+  /** Up to 10 conditions; the rule matches when EVERY one holds. A fact that is unknown (no IP intelligence, no address on a passkey sign-in) matches no condition. */
+  conditions: Array<{
+    /** The fact to test. */
+    field: 'ip' | 'country' | 'asn' | 'as_organization' | 'is_hosting' | 'is_vpn' | 'is_proxy' | 'is_tor' | 'email' | 'email_domain' | 'disposable_email' | 'user_agent' | 'method' | 'new_device' | 'impossible_travel' | 'travel_kmh' | 'risk_score' | 'ip_attempts_1m' | 'ip_attempts_1h' | 'ip_distinct_emails_10m' | 'ip_failures_1h' | 'email_attempts_1h' | 'email_failures_1h' | 'device_attempts_1h';
+    /** How to compare it. Which operators a field takes depends on its type. */
+    operator: 'eq' | 'neq' | 'in' | 'not_in' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'in_cidr' | 'not_in_cidr';
+    /** The one value to compare with, as text — `DK`, `20`, `true`. For every operator except the list ones. */
+    value?: string;
+    /** The values to compare with, for `in`, `not_in`, `in_cidr` and `not_in_cidr`. */
+    values?: string[];
+  }>;
+  /** Whether the rule is evaluated. Default true. */
+  enabled?: boolean;
+  /** Where in the order to put it: 1 is evaluated first. Default: last. */
+  position?: number;
+}
+
+/** Response body of `radar.rules.create`. */
+export type RadarRulesCreateResponse = {
+  data: RadarRule;
+};
+
+/** Response body of `radar.rules.delete`. */
+export type RadarRulesDeleteResponse = void;
+
+/** Response body of `radar.rules.get`. */
+export type RadarRulesGetResponse = {
+  data: RadarRule;
+};
+
+/** Query parameters of `radar.rules.list`. */
+export interface RadarRulesListQuery {
+  /** Rules per page, 1–100. Default 100 — an environment holds at most 100, so one page is all of them. */
+  limit?: number;
+  /** The `next_cursor` of the previous page. */
+  after?: string;
+}
+
+/** Response body of `radar.rules.list`. */
+export type RadarRulesListResponse = {
+  data: RadarRule[];
+  meta: PageMeta;
+};
+
+/** Request body of `radar.rules.reorder`. */
+export interface RadarRulesReorderBody {
+  /** Every rule id, in the new order. */
+  rule_ids: string[];
+}
+
+/** Response body of `radar.rules.reorder`. */
+export type RadarRulesReorderResponse = void;
+
+/** Request body of `radar.rules.update`. */
+export interface RadarRulesUpdateBody {
+  /** What the rule is for, as the console lists it. */
+  name?: string;
+  /** Why the rule exists, for whoever reads it next. */
+  description?: string | null;
+  /** What happens when every condition holds: `allow` (skip every rule after this one), `challenge` (a second factor on sign-in; a CAPTCHA or an emailed code on sign-up) or `block`. */
+  action?: 'allow' | 'challenge' | 'block';
+  /** `all` (the default), `sign_in` or `sign_up`. */
+  applies_to?: 'all' | 'sign_in' | 'sign_up';
+  /** Up to 10 conditions; the rule matches when EVERY one holds. A fact that is unknown (no IP intelligence, no address on a passkey sign-in) matches no condition. */
+  conditions?: Array<{
+    /** The fact to test. */
+    field: 'ip' | 'country' | 'asn' | 'as_organization' | 'is_hosting' | 'is_vpn' | 'is_proxy' | 'is_tor' | 'email' | 'email_domain' | 'disposable_email' | 'user_agent' | 'method' | 'new_device' | 'impossible_travel' | 'travel_kmh' | 'risk_score' | 'ip_attempts_1m' | 'ip_attempts_1h' | 'ip_distinct_emails_10m' | 'ip_failures_1h' | 'email_attempts_1h' | 'email_failures_1h' | 'device_attempts_1h';
+    /** How to compare it. Which operators a field takes depends on its type. */
+    operator: 'eq' | 'neq' | 'in' | 'not_in' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'in_cidr' | 'not_in_cidr';
+    /** The one value to compare with, as text — `DK`, `20`, `true`. For every operator except the list ones. */
+    value?: string;
+    /** The values to compare with, for `in`, `not_in`, `in_cidr` and `not_in_cidr`. */
+    values?: string[];
+  }>;
+  /** Whether the rule is evaluated. Default true. */
+  enabled?: boolean;
+  /** Where in the order to put it: 1 is evaluated first. Default: last. */
+  position?: number;
+}
+
+/** Response body of `radar.rules.update`. */
+export type RadarRulesUpdateResponse = {
+  data: RadarRule;
+};
+
+/** Response body of `radar.settings.get`. */
+export type RadarSettingsGetResponse = {
+  data: RadarSettings;
+};
+
+/** Request body of `radar.settings.update`. */
+export interface RadarSettingsUpdateBody {
+  /** Rule key => `{"enabled": bool, "action": "allow"|"challenge"|"block", "threshold": int}`, each part optional. Keys: credential_stuffing, bot_velocity, account_attack, impossible_travel, new_device, anonymous_network, hosting_network, disposable_email, risk_score_reject, risk_score_elevated. */
+  builtin_rules: Record<string, unknown>;
+}
+
+/** Response body of `radar.settings.update`. */
+export type RadarSettingsUpdateResponse = {
+  data: RadarSettings;
 };
 
 /** Request body of `roles.create`. */
@@ -2795,6 +3832,26 @@ export interface SigninSelfServiceSignupSetBody {
 /** Response body of `signin.self_service_signup.set`. */
 export type SigninSelfServiceSignupSetResponse = {
   data: SelfServiceSignup;
+};
+
+/** Response body of `signin.sms.get`. */
+export type SigninSmsGetResponse = {
+  data: SmsFactorPolicy;
+};
+
+/** Request body of `signin.sms.update`. */
+export interface SigninSmsUpdateBody {
+  /** Accept text messages as a second factor in this environment. Off by default: SMS is the weakest factor offered. */
+  enabled?: boolean;
+  /** ISO 3166-1 alpha-2 countries whose numbers may enrol and be texted. Required to be non-empty while SMS is on: which countries you text is your toll-fraud exposure. */
+  allowed_countries?: Array<'AC' | 'AD' | 'AE' | 'AF' | 'AG' | 'AI' | 'AL' | 'AM' | 'AO' | 'AR' | 'AS' | 'AT' | 'AU' | 'AW' | 'AZ' | 'BA' | 'BB' | 'BD' | 'BE' | 'BF' | 'BG' | 'BH' | 'BI' | 'BJ' | 'BM' | 'BN' | 'BO' | 'BR' | 'BS' | 'BT' | 'BW' | 'BY' | 'BZ' | 'CA' | 'CD' | 'CF' | 'CG' | 'CH' | 'CI' | 'CK' | 'CL' | 'CM' | 'CN' | 'CO' | 'CR' | 'CU' | 'CV' | 'CW' | 'CY' | 'CZ' | 'DE' | 'DJ' | 'DK' | 'DM' | 'DO' | 'DZ' | 'EC' | 'EE' | 'EG' | 'ER' | 'ES' | 'ET' | 'FI' | 'FJ' | 'FK' | 'FM' | 'FO' | 'FR' | 'GA' | 'GB' | 'GD' | 'GE' | 'GF' | 'GH' | 'GI' | 'GL' | 'GM' | 'GN' | 'GP' | 'GQ' | 'GR' | 'GT' | 'GU' | 'GW' | 'GY' | 'HK' | 'HN' | 'HR' | 'HT' | 'HU' | 'ID' | 'IE' | 'IL' | 'IN' | 'IO' | 'IQ' | 'IR' | 'IS' | 'IT' | 'JM' | 'JO' | 'JP' | 'KE' | 'KG' | 'KH' | 'KI' | 'KM' | 'KN' | 'KP' | 'KR' | 'KW' | 'KY' | 'KZ' | 'LA' | 'LB' | 'LC' | 'LI' | 'LK' | 'LR' | 'LS' | 'LT' | 'LU' | 'LV' | 'LY' | 'MA' | 'MC' | 'MD' | 'ME' | 'MG' | 'MH' | 'MK' | 'ML' | 'MM' | 'MN' | 'MO' | 'MP' | 'MQ' | 'MR' | 'MS' | 'MT' | 'MU' | 'MV' | 'MW' | 'MX' | 'MY' | 'MZ' | 'NA' | 'NC' | 'NE' | 'NF' | 'NG' | 'NI' | 'NL' | 'NO' | 'NP' | 'NR' | 'NU' | 'NZ' | 'OM' | 'PA' | 'PE' | 'PF' | 'PG' | 'PH' | 'PK' | 'PL' | 'PM' | 'PR' | 'PS' | 'PT' | 'PW' | 'PY' | 'QA' | 'RE' | 'RO' | 'RS' | 'RU' | 'RW' | 'SA' | 'SB' | 'SC' | 'SD' | 'SE' | 'SG' | 'SH' | 'SI' | 'SK' | 'SL' | 'SM' | 'SN' | 'SO' | 'SR' | 'SS' | 'ST' | 'SV' | 'SX' | 'SY' | 'SZ' | 'TC' | 'TD' | 'TG' | 'TH' | 'TJ' | 'TK' | 'TL' | 'TM' | 'TN' | 'TO' | 'TR' | 'TT' | 'TV' | 'TW' | 'TZ' | 'UA' | 'UG' | 'US' | 'UY' | 'UZ' | 'VC' | 'VE' | 'VG' | 'VI' | 'VN' | 'VU' | 'WF' | 'WS' | 'XK' | 'YE' | 'ZA' | 'ZM' | 'ZW'>;
+  /** Administrators may add SMS only beside an authenticator app or a passkey, and are asked to enrol one if SMS is all they hold. On by default. */
+  privileged_need_stronger_factor?: boolean;
+}
+
+/** Response body of `signin.sms.update`. */
+export type SigninSmsUpdateResponse = {
+  data: SmsFactorPolicy;
 };
 
 /** Request body of `signin.social.delete`. */
@@ -3376,6 +4433,9 @@ export type UsersListResponse = {
 /** Response body of `users.mfa.reset`. */
 export type UsersMfaResetResponse = void;
 
+/** Response body of `users.mfa.sms.remove`. */
+export type UsersMfaSmsRemoveResponse = void;
+
 /** Response body of `users.password_reset.send`. */
 export type UsersPasswordResetSendResponse = void;
 
@@ -3441,7 +4501,7 @@ export interface WebhooksCreateBody {
   /** A public HTTPS URL. Signed deliveries are POSTed here. */
   url: string;
   /** The events it receives. */
-  event_types: Array<'user.created' | 'user.updated' | 'user.deactivated' | 'user.login' | 'user.reactivated' | 'identity.linked' | 'user.erased' | 'organization.created' | 'organization.suspended' | 'organization.reactivated' | 'organization.updated' | 'organization.deleted' | 'membership.created' | 'membership.updated' | 'membership.deleted' | 'invitation.created' | 'invitation.accepted' | 'invitation.revoked' | 'role.assigned' | 'role.unassigned' | 'role.assigned_everywhere' | 'role.unassigned_everywhere' | 'api_key.created' | 'api_key.revoked' | 'support_session.started' | 'directory.user.provisioned' | 'directory.user.deprovisioned' | 'directory.user.deactivated' | 'directory.group.membership_changed' | 'domain.added' | 'domain.removed' | 'domain.verified' | 'connection.activated' | 'connection.certificate_expiring' | 'entitlement.set' | 'entitlement.updated' | 'entitlement.revoked' | 'vault.grant.created' | 'vault.grant.revoked' | 'vault.secret.revoked' | 'governance.access.revoked'>;
+  event_types: Array<'user.created' | 'user.updated' | 'user.deactivated' | 'user.login' | 'user.reactivated' | 'identity.linked' | 'user.erased' | 'organization.created' | 'organization.suspended' | 'organization.reactivated' | 'organization.updated' | 'organization.deleted' | 'membership.created' | 'membership.updated' | 'membership.deleted' | 'invitation.created' | 'invitation.accepted' | 'invitation.revoked' | 'role.assigned' | 'role.unassigned' | 'role.assigned_everywhere' | 'role.unassigned_everywhere' | 'api_key.created' | 'api_key.revoked' | 'support_session.started' | 'directory.user.provisioned' | 'directory.user.deprovisioned' | 'directory.user.deactivated' | 'directory.group.membership_changed' | 'domain.added' | 'domain.removed' | 'domain.verified' | 'connection.activated' | 'connection.certificate_expiring' | 'entitlement.set' | 'entitlement.updated' | 'entitlement.revoked' | 'vault.grant.created' | 'vault.grant.revoked' | 'vault.secret.revoked' | 'pipe.connection.connected' | 'pipe.connection.needs_reauth' | 'pipe.connection.disconnected' | 'governance.access.revoked' | 'feature_flag.created' | 'feature_flag.updated' | 'feature_flag.deleted'>;
   /** How deliveries are signed: `cbox` (X-Cbox-Signature, the default) or `standard_webhooks` (webhook-id / webhook-timestamp / webhook-signature, verifiable with any Standard Webhooks library; the secret is a `whsec_` secret). */
   signature_scheme?: 'cbox' | 'standard_webhooks';
   /** The organization it belongs to; it carries that organization's traffic only. Send this or environment_wide. */
@@ -3574,12 +4634,16 @@ export const environmentOperations = {
   'branding.whitelabel.set': { action: 'branding.whitelabel.set', operationId: 'branding_whitelabel_set', method: 'PUT', path: '/branding/whitelabel', pathParams: [], scope: 'branding:write', danger: 'write', approval: true, body: true, pagination: null },
   'directories.connect': { action: 'directories.connect', operationId: 'directories_connect', method: 'POST', path: '/directories/connect', pathParams: [], scope: 'directory_sync:write', danger: 'critical', approval: true, body: true, pagination: null },
   'directories.create': { action: 'directories.create', operationId: 'directories_create', method: 'POST', path: '/directories', pathParams: [], scope: 'directory_sync:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'directories.credentials.replace': { action: 'directories.credentials.replace', operationId: 'directories_credentials_replace', method: 'PUT', path: '/directories/{id}/credentials', pathParams: ['id'], scope: 'directory_sync:write', danger: 'critical', approval: true, body: true, pagination: null },
   'directories.delete': { action: 'directories.delete', operationId: 'directories_delete', method: 'DELETE', path: '/directories/{id}', pathParams: ['id'], scope: 'directory_sync:write', danger: 'destructive', approval: true, body: true, pagination: null },
   'directories.get': { action: 'directories.get', operationId: 'directories_get', method: 'GET', path: '/directories/{id}', pathParams: ['id'], scope: 'directory_sync:read', danger: 'read', approval: true, body: false, pagination: null },
   'directories.groups.list': { action: 'directories.groups.list', operationId: 'directories_groups_list', method: 'GET', path: '/directories/{id}/groups', pathParams: ['id'], scope: 'directory_sync:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'directories.groups.map': { action: 'directories.groups.map', operationId: 'directories_groups_map', method: 'POST', path: '/directories/{id}/group-roles', pathParams: ['id'], scope: 'directory_sync:write', danger: 'write', approval: true, body: true, pagination: null },
+  'directories.hris.connect': { action: 'directories.hris.connect', operationId: 'directories_hris_connect', method: 'POST', path: '/directories/hris', pathParams: [], scope: 'directory_sync:write', danger: 'critical', approval: true, body: true, pagination: null },
   'directories.list': { action: 'directories.list', operationId: 'directories_list', method: 'GET', path: '/directories', pathParams: [], scope: 'directory_sync:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'directories.status.set': { action: 'directories.status.set', operationId: 'directories_status_set', method: 'POST', path: '/directories/{id}/status', pathParams: ['id'], scope: 'directory_sync:write', danger: 'write', approval: true, body: true, pagination: null },
+  'directories.sync': { action: 'directories.sync', operationId: 'directories_sync', method: 'POST', path: '/directories/{id}/sync', pathParams: ['id'], scope: 'directory_sync:write', danger: 'write', approval: true, body: true, pagination: null },
+  'directories.sync_settings.update': { action: 'directories.sync_settings.update', operationId: 'directories_sync_settings_update', method: 'PATCH', path: '/directories/{id}/sync-settings', pathParams: ['id'], scope: 'directory_sync:write', danger: 'write', approval: true, body: true, pagination: null },
   'directories.token.rotate': { action: 'directories.token.rotate', operationId: 'directories_token_rotate', method: 'POST', path: '/directories/{id}/rotate', pathParams: ['id'], scope: 'directory_sync:write', danger: 'critical', approval: true, body: true, pagination: null },
   'directories.update': { action: 'directories.update', operationId: 'directories_update', method: 'PATCH', path: '/directories/{id}', pathParams: ['id'], scope: 'directory_sync:write', danger: 'write', approval: true, body: true, pagination: null },
   'domains.add': { action: 'domains.add', operationId: 'domains_add', method: 'POST', path: '/domains', pathParams: [], scope: 'domains:write', danger: 'write', approval: true, body: true, pagination: null },
@@ -3587,6 +4651,22 @@ export const environmentOperations = {
   'domains.remove': { action: 'domains.remove', operationId: 'domains_remove', method: 'DELETE', path: '/domains', pathParams: [], scope: 'domains:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'domains.verify': { action: 'domains.verify', operationId: 'domains_verify', method: 'POST', path: '/domains/verify', pathParams: [], scope: 'domains:write', danger: 'write', approval: true, body: false, pagination: null },
   'events.list': { action: 'events.list', operationId: 'events_list', method: 'GET', path: '/events', pathParams: [], scope: 'events:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'feature_flags.create': { action: 'feature_flags.create', operationId: 'feature_flags_create', method: 'POST', path: '/feature-flags', pathParams: [], scope: 'feature_flags:write', danger: 'write', approval: true, body: true, pagination: null },
+  'feature_flags.delete': { action: 'feature_flags.delete', operationId: 'feature_flags_delete', method: 'DELETE', path: '/feature-flags/{id}', pathParams: ['id'], scope: 'feature_flags:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'feature_flags.evaluate': { action: 'feature_flags.evaluate', operationId: 'feature_flags_evaluate', method: 'GET', path: '/feature-flags/evaluate', pathParams: [], scope: 'feature_flags:read', danger: 'read', approval: true, body: false, pagination: null },
+  'feature_flags.get': { action: 'feature_flags.get', operationId: 'feature_flags_get', method: 'GET', path: '/feature-flags/{id}', pathParams: ['id'], scope: 'feature_flags:read', danger: 'read', approval: true, body: false, pagination: null },
+  'feature_flags.list': { action: 'feature_flags.list', operationId: 'feature_flags_list', method: 'GET', path: '/feature-flags', pathParams: [], scope: 'feature_flags:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'feature_flags.update': { action: 'feature_flags.update', operationId: 'feature_flags_update', method: 'PATCH', path: '/feature-flags/{id}', pathParams: ['id'], scope: 'feature_flags:write', danger: 'write', approval: true, body: true, pagination: null },
+  'fga.check': { action: 'fga.check', operationId: 'fga_check', method: 'GET', path: '/fga/check', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: null },
+  'fga.check.batch': { action: 'fga.check.batch', operationId: 'fga_check_batch', method: 'GET', path: '/fga/check/batch', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: null },
+  'fga.resources.list': { action: 'fga.resources.list', operationId: 'fga_resources_list', method: 'GET', path: '/fga/resources', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'fga.schema.get': { action: 'fga.schema.get', operationId: 'fga_schema_get', method: 'GET', path: '/fga/schema', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: null },
+  'fga.schema.update': { action: 'fga.schema.update', operationId: 'fga_schema_update', method: 'PUT', path: '/fga/schema', pathParams: [], scope: 'fga:schema', danger: 'critical', approval: true, body: true, pagination: null },
+  'fga.schema.validate': { action: 'fga.schema.validate', operationId: 'fga_schema_validate', method: 'GET', path: '/fga/schema/validate', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: null },
+  'fga.subjects.list': { action: 'fga.subjects.list', operationId: 'fga_subjects_list', method: 'GET', path: '/fga/subjects', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'fga.tuples.delete': { action: 'fga.tuples.delete', operationId: 'fga_tuples_delete', method: 'POST', path: '/fga/tuples/delete', pathParams: [], scope: 'fga:write', danger: 'destructive', approval: true, body: true, pagination: null },
+  'fga.tuples.list': { action: 'fga.tuples.list', operationId: 'fga_tuples_list', method: 'GET', path: '/fga/tuples', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'fga.tuples.write': { action: 'fga.tuples.write', operationId: 'fga_tuples_write', method: 'POST', path: '/fga/tuples', pathParams: [], scope: 'fga:write', danger: 'write', approval: true, body: true, pagination: null },
   'frontend_keys.create': { action: 'frontend_keys.create', operationId: 'frontend_keys_create', method: 'POST', path: '/frontend-keys', pathParams: [], scope: 'frontend_keys:write', danger: 'write', approval: true, body: true, pagination: null },
   'frontend_keys.list': { action: 'frontend_keys.list', operationId: 'frontend_keys_list', method: 'GET', path: '/frontend-keys', pathParams: [], scope: 'frontend_keys:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'frontend_keys.revoke': { action: 'frontend_keys.revoke', operationId: 'frontend_keys_revoke', method: 'DELETE', path: '/frontend-keys/{id}', pathParams: ['id'], scope: 'frontend_keys:write', danger: 'destructive', approval: true, body: false, pagination: null },
@@ -3641,11 +4721,34 @@ export const environmentOperations = {
   'permissions.delete': { action: 'permissions.delete', operationId: 'permissions_delete', method: 'DELETE', path: '/permissions/{id}', pathParams: ['id'], scope: 'role_definitions:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'permissions.list': { action: 'permissions.list', operationId: 'permissions_list', method: 'GET', path: '/permissions', pathParams: [], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'permissions.update': { action: 'permissions.update', operationId: 'permissions_update', method: 'PATCH', path: '/permissions/{id}', pathParams: ['id'], scope: 'role_definitions:write', danger: 'write', approval: true, body: true, pagination: null },
+  'pipes.connections.delete': { action: 'pipes.connections.delete', operationId: 'pipes_connections_delete', method: 'DELETE', path: '/pipes/{id}/connections/{connection_id}', pathParams: ['id', 'connection_id'], scope: 'pipes:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'pipes.connections.list': { action: 'pipes.connections.list', operationId: 'pipes_connections_list', method: 'GET', path: '/pipes/{id}/connections', pathParams: ['id'], scope: 'pipes:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'pipes.create': { action: 'pipes.create', operationId: 'pipes_create', method: 'POST', path: '/pipes', pathParams: [], scope: 'pipes:write', danger: 'write', approval: true, body: true, pagination: null },
+  'pipes.delete': { action: 'pipes.delete', operationId: 'pipes_delete', method: 'DELETE', path: '/pipes/{id}', pathParams: ['id'], scope: 'pipes:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'pipes.get': { action: 'pipes.get', operationId: 'pipes_get', method: 'GET', path: '/pipes/{id}', pathParams: ['id'], scope: 'pipes:read', danger: 'read', approval: true, body: false, pagination: null },
+  'pipes.grants.create': { action: 'pipes.grants.create', operationId: 'pipes_grants_create', method: 'POST', path: '/pipes/{id}/grants', pathParams: ['id'], scope: 'pipes:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'pipes.grants.delete': { action: 'pipes.grants.delete', operationId: 'pipes_grants_delete', method: 'DELETE', path: '/pipes/{id}/grants/{client_id}', pathParams: ['id', 'client_id'], scope: 'pipes:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'pipes.list': { action: 'pipes.list', operationId: 'pipes_list', method: 'GET', path: '/pipes', pathParams: [], scope: 'pipes:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'pipes.update': { action: 'pipes.update', operationId: 'pipes_update', method: 'PATCH', path: '/pipes/{id}', pathParams: ['id'], scope: 'pipes:write', danger: 'write', approval: true, body: true, pagination: null },
   'provisioning.targets.create': { action: 'provisioning.targets.create', operationId: 'provisioning_targets_create', method: 'POST', path: '/provisioning-targets', pathParams: [], scope: 'provisioning:write', danger: 'critical', approval: true, body: true, pagination: null },
   'provisioning.targets.delete': { action: 'provisioning.targets.delete', operationId: 'provisioning_targets_delete', method: 'DELETE', path: '/provisioning-targets/{id}', pathParams: ['id'], scope: 'provisioning:write', danger: 'destructive', approval: true, body: true, pagination: null },
   'provisioning.targets.get': { action: 'provisioning.targets.get', operationId: 'provisioning_targets_get', method: 'GET', path: '/provisioning-targets/{id}', pathParams: ['id'], scope: 'provisioning:read', danger: 'read', approval: true, body: false, pagination: null },
   'provisioning.targets.list': { action: 'provisioning.targets.list', operationId: 'provisioning_targets_list', method: 'GET', path: '/provisioning-targets', pathParams: [], scope: 'provisioning:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'provisioning.targets.status.set': { action: 'provisioning.targets.status.set', operationId: 'provisioning_targets_status_set', method: 'POST', path: '/provisioning-targets/{id}/status', pathParams: ['id'], scope: 'provisioning:write', danger: 'write', approval: true, body: true, pagination: null },
+  'radar.decisions.get': { action: 'radar.decisions.get', operationId: 'radar_decisions_get', method: 'GET', path: '/radar/decisions/{id}', pathParams: ['id'], scope: 'radar:read', danger: 'read', approval: true, body: false, pagination: null },
+  'radar.decisions.list': { action: 'radar.decisions.list', operationId: 'radar_decisions_list', method: 'GET', path: '/radar/decisions', pathParams: [], scope: 'radar:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'radar.lists.add': { action: 'radar.lists.add', operationId: 'radar_lists_add', method: 'POST', path: '/radar/lists', pathParams: [], scope: 'radar:write', danger: 'write', approval: true, body: true, pagination: null },
+  'radar.lists.list': { action: 'radar.lists.list', operationId: 'radar_lists_list', method: 'GET', path: '/radar/lists', pathParams: [], scope: 'radar:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'radar.lists.remove': { action: 'radar.lists.remove', operationId: 'radar_lists_remove', method: 'DELETE', path: '/radar/lists/{id}', pathParams: ['id'], scope: 'radar:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'radar.mode.set': { action: 'radar.mode.set', operationId: 'radar_mode_set', method: 'PUT', path: '/radar/mode', pathParams: [], scope: 'radar:manage', danger: 'critical', approval: true, body: true, pagination: null },
+  'radar.rules.create': { action: 'radar.rules.create', operationId: 'radar_rules_create', method: 'POST', path: '/radar/rules', pathParams: [], scope: 'radar:write', danger: 'write', approval: true, body: true, pagination: null },
+  'radar.rules.delete': { action: 'radar.rules.delete', operationId: 'radar_rules_delete', method: 'DELETE', path: '/radar/rules/{id}', pathParams: ['id'], scope: 'radar:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'radar.rules.get': { action: 'radar.rules.get', operationId: 'radar_rules_get', method: 'GET', path: '/radar/rules/{id}', pathParams: ['id'], scope: 'radar:read', danger: 'read', approval: true, body: false, pagination: null },
+  'radar.rules.list': { action: 'radar.rules.list', operationId: 'radar_rules_list', method: 'GET', path: '/radar/rules', pathParams: [], scope: 'radar:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'radar.rules.reorder': { action: 'radar.rules.reorder', operationId: 'radar_rules_reorder', method: 'PUT', path: '/radar/rules/order', pathParams: [], scope: 'radar:write', danger: 'write', approval: true, body: true, pagination: null },
+  'radar.rules.update': { action: 'radar.rules.update', operationId: 'radar_rules_update', method: 'PATCH', path: '/radar/rules/{id}', pathParams: ['id'], scope: 'radar:write', danger: 'write', approval: true, body: true, pagination: null },
+  'radar.settings.get': { action: 'radar.settings.get', operationId: 'radar_settings_get', method: 'GET', path: '/radar/settings', pathParams: [], scope: 'radar:read', danger: 'read', approval: true, body: false, pagination: null },
+  'radar.settings.update': { action: 'radar.settings.update', operationId: 'radar_settings_update', method: 'PATCH', path: '/radar/settings', pathParams: [], scope: 'radar:write', danger: 'write', approval: true, body: true, pagination: null },
   'roles.create': { action: 'roles.create', operationId: 'roles_create', method: 'POST', path: '/roles', pathParams: [], scope: 'role_definitions:write', danger: 'write', approval: true, body: true, pagination: null },
   'roles.delete': { action: 'roles.delete', operationId: 'roles_delete', method: 'DELETE', path: '/roles/{id}', pathParams: ['id'], scope: 'role_definitions:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'roles.get': { action: 'roles.get', operationId: 'roles_get', method: 'GET', path: '/roles/{id}', pathParams: ['id'], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
@@ -3662,6 +4765,8 @@ export const environmentOperations = {
   'signin.policy.inherit': { action: 'signin.policy.inherit', operationId: 'signin_policy_inherit', method: 'DELETE', path: '/sign-in/policy/organizations/{organization_id}', pathParams: ['organization_id'], scope: 'signin:write', danger: 'critical', approval: true, body: false, pagination: null },
   'signin.policy.update': { action: 'signin.policy.update', operationId: 'signin_policy_update', method: 'PATCH', path: '/sign-in/policy', pathParams: [], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
   'signin.self_service_signup.set': { action: 'signin.self_service_signup.set', operationId: 'signin_self_service_signup_set', method: 'PUT', path: '/sign-in/self-service-signup', pathParams: [], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'signin.sms.get': { action: 'signin.sms.get', operationId: 'signin_sms_get', method: 'GET', path: '/sign-in/sms', pathParams: [], scope: 'signin:read', danger: 'read', approval: true, body: false, pagination: null },
+  'signin.sms.update': { action: 'signin.sms.update', operationId: 'signin_sms_update', method: 'PATCH', path: '/sign-in/sms', pathParams: [], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
   'signin.social.delete': { action: 'signin.social.delete', operationId: 'signin_social_delete', method: 'DELETE', path: '/sign-in/social-providers/{id}', pathParams: ['id'], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
   'signin.social.list': { action: 'signin.social.list', operationId: 'signin_social_list', method: 'GET', path: '/sign-in/social-providers', pathParams: [], scope: 'signin:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'signin.social.set': { action: 'signin.social.set', operationId: 'signin_social_set', method: 'POST', path: '/sign-in/social-providers', pathParams: [], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
@@ -3706,6 +4811,7 @@ export const environmentOperations = {
   'users.get': { action: 'users.get', operationId: 'users_get', method: 'GET', path: '/users/{id}', pathParams: ['id'], scope: 'users:read', danger: 'read', approval: true, body: false, pagination: null },
   'users.list': { action: 'users.list', operationId: 'users_list', method: 'GET', path: '/users', pathParams: [], scope: 'users:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'users.mfa.reset': { action: 'users.mfa.reset', operationId: 'users_mfa_reset', method: 'DELETE', path: '/users/{id}/mfa', pathParams: ['id'], scope: 'users:write', danger: 'critical', approval: true, body: false, pagination: null },
+  'users.mfa.sms.remove': { action: 'users.mfa.sms.remove', operationId: 'users_mfa_sms_remove', method: 'DELETE', path: '/users/{id}/mfa/sms', pathParams: ['id'], scope: 'users:write', danger: 'critical', approval: true, body: false, pagination: null },
   'users.password_reset.send': { action: 'users.password_reset.send', operationId: 'users_password_reset_send', method: 'POST', path: '/users/{id}/password-reset', pathParams: ['id'], scope: 'users:write', danger: 'write', approval: true, body: false, pagination: null },
   'users.password.set': { action: 'users.password.set', operationId: 'users_password_set', method: 'POST', path: '/users/{id}/password', pathParams: ['id'], scope: 'users:write', danger: 'critical', approval: true, body: true, pagination: null },
   'users.reactivate': { action: 'users.reactivate', operationId: 'users_reactivate', method: 'POST', path: '/users/{id}/reactivate', pathParams: ['id'], scope: 'users:write', danger: 'write', approval: true, body: false, pagination: null },
@@ -4559,6 +5665,18 @@ export class EnvironmentClient {
     listAll: (query?: Omit<DirectoriesListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<Directory, void, undefined> =>
       this.transport.paginate(environmentOperations['directories.list'], [], query as Record<string, unknown> | undefined, options),
     /**
+     * Pull a Google Workspace, Microsoft Entra or HR-system directory now, on a worker. `full` asks an HR system for everybody rather than what changed.
+     *
+     * Requires scope `directory_sync:write`. Danger: write.
+     *
+     * `POST /directories/{id}/sync` · action `directories.sync`
+     * @scope `directory_sync:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    sync: <O extends CallOptions = CallOptions>(id: string, body?: DirectoriesSyncBody, options?: O): Promise<Outcome<DirectoriesSyncResponse, O>> =>
+      this.transport.call<DirectoriesSyncResponse, O>(environmentOperations['directories.sync'], [id], body, options),
+    /**
      * Rename an inbound directory.
      *
      * Requires scope `directory_sync:write`. Danger: write.
@@ -4570,6 +5688,20 @@ export class EnvironmentClient {
      */
     update: <O extends CallOptions = CallOptions>(id: string, body: DirectoriesUpdateBody, options?: O): Promise<Outcome<DirectoriesUpdateResponse, O>> =>
       this.transport.call<DirectoriesUpdateResponse, O>(environmentOperations['directories.update'], [id], body, options),
+    credentials: {
+      /**
+       * Replace a pull directory's provider credentials, verifying the new ones first. Write-only; never returned.
+       *
+       * Requires scope `directory_sync:write`. Danger: critical.
+       *
+       * `PUT /directories/{id}/credentials` · action `directories.credentials.replace`
+       * @scope `directory_sync:write`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      replace: <O extends CallOptions = CallOptions>(id: string, body: DirectoriesCredentialsReplaceBody, options?: O): Promise<Outcome<DirectoriesCredentialsReplaceResponse, O>> =>
+        this.transport.call<DirectoriesCredentialsReplaceResponse, O>(environmentOperations['directories.credentials.replace'], [id], body, options),
+    },
     groups: {
       /**
        * List the groups a directory has synced, with the role ids each group is mapped onto.
@@ -4599,6 +5731,20 @@ export class EnvironmentClient {
       map: <O extends CallOptions = CallOptions>(id: string, body: DirectoriesGroupsMapBody, options?: O): Promise<Outcome<DirectoriesGroupsMapResponse, O>> =>
         this.transport.call<DirectoriesGroupsMapResponse, O>(environmentOperations['directories.groups.map'], [id], body, options),
     },
+    hris: {
+      /**
+       * Connect an HR system (Workday, BambooHR, Rippling, HiBob or Personio) to sync an organization's people from, verifying the credentials first. The first sync is queued.
+       *
+       * Requires scope `directory_sync:write`. Danger: critical.
+       *
+       * `POST /directories/hris` · action `directories.hris.connect`
+       * @scope `directory_sync:write`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      connect: <O extends CallOptions = CallOptions>(body: DirectoriesHrisConnectBody, options?: O): Promise<Outcome<DirectoriesHrisConnectResponse, O>> =>
+        this.transport.call<DirectoriesHrisConnectResponse, O>(environmentOperations['directories.hris.connect'], [], body, options),
+    },
     status: {
       /**
        * Pause or resume an inbound directory's provisioning.
@@ -4612,6 +5758,20 @@ export class EnvironmentClient {
        */
       set: <O extends CallOptions = CallOptions>(id: string, body: DirectoriesStatusSetBody, options?: O): Promise<Outcome<DirectoriesStatusSetResponse, O>> =>
         this.transport.call<DirectoriesStatusSetResponse, O>(environmentOperations['directories.status.set'], [id], body, options),
+    },
+    syncSettings: {
+      /**
+       * Set how often a pull directory syncs, and for an HR system which of its fields pass through onto people.
+       *
+       * Requires scope `directory_sync:write`. Danger: write.
+       *
+       * `PATCH /directories/{id}/sync-settings` · action `directories.sync_settings.update`
+       * @scope `directory_sync:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(id: string, body?: DirectoriesSyncSettingsUpdateBody, options?: O): Promise<Outcome<DirectoriesSyncSettingsUpdateResponse, O>> =>
+        this.transport.call<DirectoriesSyncSettingsUpdateResponse, O>(environmentOperations['directories.sync_settings.update'], [id], body, options),
     },
     token: {
       /**
@@ -4696,6 +5856,224 @@ export class EnvironmentClient {
     /** Every item of `events.list`, fetching pages as the iteration reaches them. */
     listAll: (query?: Omit<EventsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<DomainEvent, void, undefined> =>
       this.transport.paginate(environmentOperations['events.list'], [], query as Record<string, unknown> | undefined, options),
+  };
+
+  readonly featureFlags = {
+    /**
+     * Define a feature flag: a key apps ask about, its default, and who it is on for — named users, named organizations, a rollout percentage.
+     *
+     * Requires scope `feature_flags:write`. Danger: write.
+     *
+     * `POST /feature-flags` · action `feature_flags.create`
+     * @scope `feature_flags:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    create: <O extends CallOptions = CallOptions>(body: FeatureFlagsCreateBody, options?: O): Promise<Outcome<FeatureFlagsCreateResponse, O>> =>
+      this.transport.call<FeatureFlagsCreateResponse, O>(environmentOperations['feature_flags.create'], [], body, options),
+    /**
+     * Delete a feature flag and its rules. Its key evaluates to off from now on; tokens already minted keep it until they expire.
+     *
+     * Requires scope `feature_flags:write`. Danger: destructive.
+     *
+     * `DELETE /feature-flags/{id}` · action `feature_flags.delete`
+     * @scope `feature_flags:write`
+     * @danger destructive
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    delete: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<FeatureFlagsDeleteResponse, O>> =>
+      this.transport.call<FeatureFlagsDeleteResponse, O>(environmentOperations['feature_flags.delete'], [id], undefined, options),
+    /**
+     * Evaluate every feature flag for a user in an organization: whether each is on, and the rule that decided. For app backends without a token in hand.
+     *
+     * Requires scope `feature_flags:read`. Danger: read.
+     *
+     * `GET /feature-flags/evaluate` · action `feature_flags.evaluate`
+     * @scope `feature_flags:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    evaluate: <O extends CallOptions = CallOptions>(query?: FeatureFlagsEvaluateQuery, options?: O): Promise<Outcome<FeatureFlagsEvaluateResponse, O>> =>
+      this.transport.call<FeatureFlagsEvaluateResponse, O>(environmentOperations['feature_flags.evaluate'], [], query, options),
+    /**
+     * Read one feature flag: its default, whether it is switched on, and every user, organization and rollout rule.
+     *
+     * Requires scope `feature_flags:read`. Danger: read.
+     *
+     * `GET /feature-flags/{id}` · action `feature_flags.get`
+     * @scope `feature_flags:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<FeatureFlagsGetResponse, O>> =>
+      this.transport.call<FeatureFlagsGetResponse, O>(environmentOperations['feature_flags.get'], [id], undefined, options),
+    /**
+     * List this environment's feature flags with their default, kill switch and targeting rules.
+     *
+     * Requires scope `feature_flags:read`. Danger: read.
+     *
+     * `GET /feature-flags` · action `feature_flags.list`
+     * @scope `feature_flags:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    list: <O extends CallOptions = CallOptions>(query?: FeatureFlagsListQuery, options?: O): Promise<Outcome<FeatureFlagsListResponse, O>> =>
+      this.transport.call<FeatureFlagsListResponse, O>(environmentOperations['feature_flags.list'], [], query, options),
+    /** Every item of `feature_flags.list`, fetching pages as the iteration reaches them. */
+    listAll: (query?: Omit<FeatureFlagsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<FeatureFlag, void, undefined> =>
+      this.transport.paginate(environmentOperations['feature_flags.list'], [], query as Record<string, unknown> | undefined, options),
+    /**
+     * Change a feature flag: switch it on or off for everyone, change its default, or replace its user rules, organization rules or rollout percentage.
+     *
+     * Requires scope `feature_flags:write`. Danger: write.
+     *
+     * `PATCH /feature-flags/{id}` · action `feature_flags.update`
+     * @scope `feature_flags:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    update: <O extends CallOptions = CallOptions>(id: string, body?: FeatureFlagsUpdateBody, options?: O): Promise<Outcome<FeatureFlagsUpdateResponse, O>> =>
+      this.transport.call<FeatureFlagsUpdateResponse, O>(environmentOperations['feature_flags.update'], [id], body, options),
+  };
+
+  readonly fga = {
+    /**
+     * Check whether a subject has a relation on a resource — directly, through computed relations, parents or nested groups. Optionally at least as fresh as a consistency_token.
+     *
+     * Requires scope `fga:read`. Danger: read.
+     *
+     * `GET /fga/check` · action `fga.check`
+     * @scope `fga:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    check: <O extends CallOptions = CallOptions>(query: FgaCheckQuery, options?: O): Promise<Outcome<FgaCheckResponse, O>> =>
+      this.transport.call<FgaCheckResponse, O>(environmentOperations['fga.check'], [], query, options),
+    /**
+     * Run 1–100 checks in one round trip, each written resource#relation@subject (document:readme#viewer@user:alice), all at the same revision, answered in order.
+     *
+     * Requires scope `fga:read`. Danger: read.
+     *
+     * `GET /fga/check/batch` · action `fga.check.batch`
+     * @scope `fga:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    checkBatch: <O extends CallOptions = CallOptions>(query: FgaCheckBatchQuery, options?: O): Promise<Outcome<FgaCheckBatchResponse, O>> =>
+      this.transport.call<FgaCheckBatchResponse, O>(environmentOperations['fga.check.batch'], [], query, options),
+    resources: {
+      /**
+       * List the resources of one type a subject has a relation on (e.g. every document alice can view), through all inheritance; sorted ids, paged with after.
+       *
+       * Requires scope `fga:read`. Danger: read.
+       *
+       * `GET /fga/resources` · action `fga.resources.list`
+       * @scope `fga:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(query: FgaResourcesListQuery, options?: O): Promise<Outcome<FgaResourcesListResponse, O>> =>
+        this.transport.call<FgaResourcesListResponse, O>(environmentOperations['fga.resources.list'], [], query, options),
+      /** Every item of `fga.resources.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<FgaResourcesListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<FgaObject, void, undefined> =>
+        this.transport.paginate(environmentOperations['fga.resources.list'], [], query as Record<string, unknown> | undefined, options),
+    },
+    schema: {
+      /**
+       * Read this environment's fine-grained authorization schema: the source text, its parsed types and relations, its version, and the current consistency token.
+       *
+       * Requires scope `fga:read`. Danger: read.
+       *
+       * `GET /fga/schema` · action `fga.schema.get`
+       * @scope `fga:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      get: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<FgaSchemaGetResponse, O>> =>
+        this.transport.call<FgaSchemaGetResponse, O>(environmentOperations['fga.schema.get'], [], undefined, options),
+      /**
+       * Replace this environment's fine-grained authorization schema (types, relations and how each is decided). Changes the answer to every check at once; refused if invalid or if existing tuples would no longer fit.
+       *
+       * Requires scope `fga:schema`. Danger: critical.
+       *
+       * `PUT /fga/schema` · action `fga.schema.update`
+       * @scope `fga:schema`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(body: FgaSchemaUpdateBody, options?: O): Promise<Outcome<FgaSchemaUpdateResponse, O>> =>
+        this.transport.call<FgaSchemaUpdateResponse, O>(environmentOperations['fga.schema.update'], [], body, options),
+      /**
+       * Check a fine-grained authorization schema without saving it: every error by line, or the parsed types and canonical text.
+       *
+       * Requires scope `fga:read`. Danger: read.
+       *
+       * `GET /fga/schema/validate` · action `fga.schema.validate`
+       * @scope `fga:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      validate: <O extends CallOptions = CallOptions>(query: FgaSchemaValidateQuery, options?: O): Promise<Outcome<FgaSchemaValidateResponse, O>> =>
+        this.transport.call<FgaSchemaValidateResponse, O>(environmentOperations['fga.schema.validate'], [], query, options),
+    },
+    subjects: {
+      /**
+       * List the subjects of one type that have a relation on a resource (e.g. every user who can view the readme), groups and inheritance expanded; sorted ids, paged with after.
+       *
+       * Requires scope `fga:read`. Danger: read.
+       *
+       * `GET /fga/subjects` · action `fga.subjects.list`
+       * @scope `fga:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(query: FgaSubjectsListQuery, options?: O): Promise<Outcome<FgaSubjectsListResponse, O>> =>
+        this.transport.call<FgaSubjectsListResponse, O>(environmentOperations['fga.subjects.list'], [], query, options),
+      /** Every item of `fga.subjects.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<FgaSubjectsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<FgaObject, void, undefined> =>
+        this.transport.paginate(environmentOperations['fga.subjects.list'], [], query as Record<string, unknown> | undefined, options),
+    },
+    tuples: {
+      /**
+       * Delete 1–100 relationship tuples in one atomic batch. Revokes the access they granted, and everything inherited through them, at once.
+       *
+       * Requires scope `fga:write`. Danger: destructive.
+       *
+       * `POST /fga/tuples/delete` · action `fga.tuples.delete`
+       * @scope `fga:write`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      delete: <O extends CallOptions = CallOptions>(body: FgaTuplesDeleteBody, options?: O): Promise<Outcome<FgaTuplesDeleteResponse, O>> =>
+        this.transport.call<FgaTuplesDeleteResponse, O>(environmentOperations['fga.tuples.delete'], [], body, options),
+      /**
+       * List stored relationship tuples oldest first, filtered by resource type and id, relation and subject; pass next_cursor as after to page.
+       *
+       * Requires scope `fga:read`. Danger: read.
+       *
+       * `GET /fga/tuples` · action `fga.tuples.list`
+       * @scope `fga:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(query?: FgaTuplesListQuery, options?: O): Promise<Outcome<FgaTuplesListResponse, O>> =>
+        this.transport.call<FgaTuplesListResponse, O>(environmentOperations['fga.tuples.list'], [], query, options),
+      /** Every item of `fga.tuples.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<FgaTuplesListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<FgaTuple, void, undefined> =>
+        this.transport.paginate(environmentOperations['fga.tuples.list'], [], query as Record<string, unknown> | undefined, options),
+      /**
+       * Write 1–100 relationship tuples (resource#relation@subject) in one atomic batch, each checked against the schema. Grants access at once; returns a consistency_token for checks that must see it.
+       *
+       * Requires scope `fga:write`. Danger: write.
+       *
+       * `POST /fga/tuples` · action `fga.tuples.write`
+       * @scope `fga:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      write: <O extends CallOptions = CallOptions>(body: FgaTuplesWriteBody, options?: O): Promise<Outcome<FgaTuplesWriteResponse, O>> =>
+        this.transport.call<FgaTuplesWriteResponse, O>(environmentOperations['fga.tuples.write'], [], body, options),
+    },
   };
 
   readonly frontendKeys = {
@@ -5477,6 +6855,127 @@ export class EnvironmentClient {
       this.transport.call<PermissionsUpdateResponse, O>(environmentOperations['permissions.update'], [id], body, options),
   };
 
+  readonly pipes = {
+    /**
+     * Configure a pipe: the environment's OAuth app at a third-party provider (GitHub, Google, Microsoft 365, Slack, Salesforce, HubSpot, Linear, Notion), so people can connect their accounts. The client secret is sealed and never returned.
+     *
+     * Requires scope `pipes:write`. Danger: write.
+     *
+     * `POST /pipes` · action `pipes.create`
+     * @scope `pipes:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    create: <O extends CallOptions = CallOptions>(body: PipesCreateBody, options?: O): Promise<Outcome<PipesCreateResponse, O>> =>
+      this.transport.call<PipesCreateResponse, O>(environmentOperations['pipes.create'], [], body, options),
+    /**
+     * Remove a pipe and every connection through it. Their tokens are revoked here, not at the provider — disconnect people first if that matters.
+     *
+     * Requires scope `pipes:write`. Danger: destructive.
+     *
+     * `DELETE /pipes/{id}` · action `pipes.delete`
+     * @scope `pipes:write`
+     * @danger destructive
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    delete: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<PipesDeleteResponse, O>> =>
+      this.transport.call<PipesDeleteResponse, O>(environmentOperations['pipes.delete'], [id], undefined, options),
+    /**
+     * Show one pipe: its provider, OAuth client id, scopes, the redirect URI to register at the provider, and the apps granted its tokens.
+     *
+     * Requires scope `pipes:read`. Danger: read.
+     *
+     * `GET /pipes/{id}` · action `pipes.get`
+     * @scope `pipes:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<PipesGetResponse, O>> =>
+      this.transport.call<PipesGetResponse, O>(environmentOperations['pipes.get'], [id], undefined, options),
+    /**
+     * List the pipes — the third-party providers people can connect their accounts to — with their scopes and the apps granted their tokens. Never a client secret.
+     *
+     * Requires scope `pipes:read`. Danger: read.
+     *
+     * `GET /pipes` · action `pipes.list`
+     * @scope `pipes:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    list: <O extends CallOptions = CallOptions>(query?: PipesListQuery, options?: O): Promise<Outcome<PipesListResponse, O>> =>
+      this.transport.call<PipesListResponse, O>(environmentOperations['pipes.list'], [], query, options),
+    /** Every item of `pipes.list`, fetching pages as the iteration reaches them. */
+    listAll: (query?: Omit<PipesListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<Pipe, void, undefined> =>
+      this.transport.paginate(environmentOperations['pipes.list'], [], query as Record<string, unknown> | undefined, options),
+    /**
+     * Change a pipe — client id, client secret (sealed), scopes, parameters, or whether it is enabled. Only what is sent changes.
+     *
+     * Requires scope `pipes:write`. Danger: write.
+     *
+     * `PATCH /pipes/{id}` · action `pipes.update`
+     * @scope `pipes:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    update: <O extends CallOptions = CallOptions>(id: string, body?: PipesUpdateBody, options?: O): Promise<Outcome<PipesUpdateResponse, O>> =>
+      this.transport.call<PipesUpdateResponse, O>(environmentOperations['pipes.update'], [id], body, options),
+    connections: {
+      /**
+       * Disconnect a person's connected account: revoke it at the provider where supported, revoke its tokens here, and forget it.
+       *
+       * Requires scope `pipes:write`. Danger: destructive.
+       *
+       * `DELETE /pipes/{id}/connections/{connection_id}` · action `pipes.connections.delete`
+       * @scope `pipes:write`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      delete: <O extends CallOptions = CallOptions>(id: string, connectionId: string, options?: O): Promise<Outcome<PipesConnectionsDeleteResponse, O>> =>
+        this.transport.call<PipesConnectionsDeleteResponse, O>(environmentOperations['pipes.connections.delete'], [id, connectionId], undefined, options),
+      /**
+       * List the accounts people connected through a pipe: who, which account, granted scopes, status (active / needs_reauth) and when the token expires. Never a token.
+       *
+       * Requires scope `pipes:read`. Danger: read.
+       *
+       * `GET /pipes/{id}/connections` · action `pipes.connections.list`
+       * @scope `pipes:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(id: string, query?: PipesConnectionsListQuery, options?: O): Promise<Outcome<PipesConnectionsListResponse, O>> =>
+        this.transport.call<PipesConnectionsListResponse, O>(environmentOperations['pipes.connections.list'], [id], query, options),
+      /** Every item of `pipes.connections.list`, fetching pages as the iteration reaches them. */
+      listAll: (id: string, query?: Omit<PipesConnectionsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<PipeConnection, void, undefined> =>
+        this.transport.paginate(environmentOperations['pipes.connections.list'], [id], query as Record<string, unknown> | undefined, options),
+    },
+    grants: {
+      /**
+       * Grant an app (by OAuth client id) the right to lease fresh access tokens for the accounts people connected through this pipe.
+       *
+       * Requires scope `pipes:write`. Danger: critical.
+       *
+       * `POST /pipes/{id}/grants` · action `pipes.grants.create`
+       * @scope `pipes:write`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      create: <O extends CallOptions = CallOptions>(id: string, body: PipesGrantsCreateBody, options?: O): Promise<Outcome<PipesGrantsCreateResponse, O>> =>
+        this.transport.call<PipesGrantsCreateResponse, O>(environmentOperations['pipes.grants.create'], [id], body, options),
+      /**
+       * Withdraw an app's right to lease the tokens people connected through this pipe.
+       *
+       * Requires scope `pipes:write`. Danger: destructive.
+       *
+       * `DELETE /pipes/{id}/grants/{client_id}` · action `pipes.grants.delete`
+       * @scope `pipes:write`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      delete: <O extends CallOptions = CallOptions>(id: string, clientId: string, options?: O): Promise<Outcome<PipesGrantsDeleteResponse, O>> =>
+        this.transport.call<PipesGrantsDeleteResponse, O>(environmentOperations['pipes.grants.delete'], [id, clientId], undefined, options),
+    },
+  };
+
   readonly provisioning = {
     targets: {
       /**
@@ -5544,6 +7043,196 @@ export class EnvironmentClient {
         set: <O extends CallOptions = CallOptions>(id: string, body: ProvisioningTargetsStatusSetBody, options?: O): Promise<Outcome<ProvisioningTargetsStatusSetResponse, O>> =>
           this.transport.call<ProvisioningTargetsStatusSetResponse, O>(environmentOperations['provisioning.targets.status.set'], [id], body, options),
       },
+    },
+  };
+
+  readonly radar = {
+    decisions: {
+      /**
+       * Read one Radar decision: the verdict, whether it was enforced, the deciding rule, every rule that fired, the reasons, the risk score and the facts it was decided on.
+       *
+       * Requires scope `radar:read`. Danger: read.
+       *
+       * `GET /radar/decisions/{id}` · action `radar.decisions.get`
+       * @scope `radar:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<RadarDecisionsGetResponse, O>> =>
+        this.transport.call<RadarDecisionsGetResponse, O>(environmentOperations['radar.decisions.get'], [id], undefined, options),
+      /**
+       * List this environment's Radar decisions newest first — verdict, deciding rule, every rule that fired, reasons and facts — filtered by verdict, flow, rule, country, email, IP, device or time; pass `next_cursor` as `after` to page. Email and IP are matched by keyed pseudonym and never returned.
+       *
+       * Requires scope `radar:read`. Danger: read.
+       *
+       * `GET /radar/decisions` · action `radar.decisions.list`
+       * @scope `radar:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(query?: RadarDecisionsListQuery, options?: O): Promise<Outcome<RadarDecisionsListResponse, O>> =>
+        this.transport.call<RadarDecisionsListResponse, O>(environmentOperations['radar.decisions.list'], [], query, options),
+      /** Every item of `radar.decisions.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<RadarDecisionsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<RadarDecision, void, undefined> =>
+        this.transport.paginate(environmentOperations['radar.decisions.list'], [], query as Record<string, unknown> | undefined, options),
+    },
+    lists: {
+      /**
+       * Add an entry to this environment's Radar allow or deny list: an IP or CIDR range, an email address, a mail domain (and its subdomains), or a device id from the decisions explorer. Deny blocks before every rule; allow skips every rule.
+       *
+       * Requires scope `radar:write`. Danger: write.
+       *
+       * `POST /radar/lists` · action `radar.lists.add`
+       * @scope `radar:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      add: <O extends CallOptions = CallOptions>(body: RadarListsAddBody, options?: O): Promise<Outcome<RadarListsAddResponse, O>> =>
+        this.transport.call<RadarListsAddResponse, O>(environmentOperations['radar.lists.add'], [], body, options),
+      /**
+       * List this environment's Radar allow and deny entries — IPs and CIDR ranges, addresses, mail domains, devices — optionally one list or one kind.
+       *
+       * Requires scope `radar:read`. Danger: read.
+       *
+       * `GET /radar/lists` · action `radar.lists.list`
+       * @scope `radar:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(query?: RadarListsListQuery, options?: O): Promise<Outcome<RadarListsListResponse, O>> =>
+        this.transport.call<RadarListsListResponse, O>(environmentOperations['radar.lists.list'], [], query, options),
+      /** Every item of `radar.lists.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<RadarListsListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<RadarListEntry, void, undefined> =>
+        this.transport.paginate(environmentOperations['radar.lists.list'], [], query as Record<string, unknown> | undefined, options),
+      /**
+       * Remove an entry from this environment's Radar allow or deny list.
+       *
+       * Requires scope `radar:write`. Danger: destructive.
+       *
+       * `DELETE /radar/lists/{id}` · action `radar.lists.remove`
+       * @scope `radar:write`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      remove: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<RadarListsRemoveResponse, O>> =>
+        this.transport.call<RadarListsRemoveResponse, O>(environmentOperations['radar.lists.remove'], [id], undefined, options),
+    },
+    mode: {
+      /**
+       * Switch this environment's Radar between `monitor` (verdicts recorded, never acted on) and `enforce` (blocks refuse sign-ins and sign-ups, challenges demand a second factor). Changes the environment's security posture.
+       *
+       * Requires scope `radar:manage`. Danger: critical.
+       *
+       * `PUT /radar/mode` · action `radar.mode.set`
+       * @scope `radar:manage`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      set: <O extends CallOptions = CallOptions>(body: RadarModeSetBody, options?: O): Promise<Outcome<RadarModeSetResponse, O>> =>
+        this.transport.call<RadarModeSetResponse, O>(environmentOperations['radar.mode.set'], [], body, options),
+    },
+    rules: {
+      /**
+       * Add a Radar rule: when EVERY condition (field, operator, value) holds, allow, challenge or block. Rules run in order after the allow/deny lists and before the built-in rules; the first match decides. Example: country not_in [DK, SE] → challenge.
+       *
+       * Requires scope `radar:write`. Danger: write.
+       *
+       * `POST /radar/rules` · action `radar.rules.create`
+       * @scope `radar:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      create: <O extends CallOptions = CallOptions>(body: RadarRulesCreateBody, options?: O): Promise<Outcome<RadarRulesCreateResponse, O>> =>
+        this.transport.call<RadarRulesCreateResponse, O>(environmentOperations['radar.rules.create'], [], body, options),
+      /**
+       * Delete a Radar rule. Attempts it decided are decided by the next matching rule, or the built-in rules, from then on.
+       *
+       * Requires scope `radar:write`. Danger: destructive.
+       *
+       * `DELETE /radar/rules/{id}` · action `radar.rules.delete`
+       * @scope `radar:write`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      delete: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<RadarRulesDeleteResponse, O>> =>
+        this.transport.call<RadarRulesDeleteResponse, O>(environmentOperations['radar.rules.delete'], [id], undefined, options),
+      /**
+       * Read one Radar rule: its action, the flows it applies to, its position and its conditions.
+       *
+       * Requires scope `radar:read`. Danger: read.
+       *
+       * `GET /radar/rules/{id}` · action `radar.rules.get`
+       * @scope `radar:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      get: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<RadarRulesGetResponse, O>> =>
+        this.transport.call<RadarRulesGetResponse, O>(environmentOperations['radar.rules.get'], [id], undefined, options),
+      /**
+       * List this environment's own Radar rules in evaluation order (the first whose conditions all hold decides), with their conditions and a readable summary of each.
+       *
+       * Requires scope `radar:read`. Danger: read.
+       *
+       * `GET /radar/rules` · action `radar.rules.list`
+       * @scope `radar:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      list: <O extends CallOptions = CallOptions>(query?: RadarRulesListQuery, options?: O): Promise<Outcome<RadarRulesListResponse, O>> =>
+        this.transport.call<RadarRulesListResponse, O>(environmentOperations['radar.rules.list'], [], query, options),
+      /** Every item of `radar.rules.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<RadarRulesListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<RadarRule, void, undefined> =>
+        this.transport.paginate(environmentOperations['radar.rules.list'], [], query as Record<string, unknown> | undefined, options),
+      /**
+       * Set the order Radar rules are evaluated in: `rule_ids` lists every rule of the environment exactly once, first evaluated first.
+       *
+       * Requires scope `radar:write`. Danger: write.
+       *
+       * `PUT /radar/rules/order` · action `radar.rules.reorder`
+       * @scope `radar:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      reorder: <O extends CallOptions = CallOptions>(body: RadarRulesReorderBody, options?: O): Promise<Outcome<RadarRulesReorderResponse, O>> =>
+        this.transport.call<RadarRulesReorderResponse, O>(environmentOperations['radar.rules.reorder'], [], body, options),
+      /**
+       * Change a Radar rule: its name, description, action, flows, enabled state, position, or (replaced whole) its conditions.
+       *
+       * Requires scope `radar:write`. Danger: write.
+       *
+       * `PATCH /radar/rules/{id}` · action `radar.rules.update`
+       * @scope `radar:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(id: string, body?: RadarRulesUpdateBody, options?: O): Promise<Outcome<RadarRulesUpdateResponse, O>> =>
+        this.transport.call<RadarRulesUpdateResponse, O>(environmentOperations['radar.rules.update'], [id], body, options),
+    },
+    settings: {
+      /**
+       * Read this environment's Radar settings: the mode (monitor or enforce, and whether it is inherited from the deployment), the IP intelligence source, and every built-in rule with its action and threshold.
+       *
+       * Requires scope `radar:read`. Danger: read.
+       *
+       * `GET /radar/settings` · action `radar.settings.get`
+       * @scope `radar:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      get: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<RadarSettingsGetResponse, O>> =>
+        this.transport.call<RadarSettingsGetResponse, O>(environmentOperations['radar.settings.get'], [], undefined, options),
+      /**
+       * Tune this environment's built-in Radar rules: `builtin_rules` maps a rule key (credential_stuffing, bot_velocity, account_attack, impossible_travel, new_device, anonymous_network, hosting_network, disposable_email, risk_score_reject, risk_score_elevated) to any of enabled, action and threshold.
+       *
+       * Requires scope `radar:write`. Danger: write.
+       *
+       * `PATCH /radar/settings` · action `radar.settings.update`
+       * @scope `radar:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(body: RadarSettingsUpdateBody, options?: O): Promise<Outcome<RadarSettingsUpdateResponse, O>> =>
+        this.transport.call<RadarSettingsUpdateResponse, O>(environmentOperations['radar.settings.update'], [], body, options),
     },
   };
 
@@ -5756,6 +7445,32 @@ export class EnvironmentClient {
        */
       set: <O extends CallOptions = CallOptions>(body: SigninSelfServiceSignupSetBody, options?: O): Promise<Outcome<SigninSelfServiceSignupSetResponse, O>> =>
         this.transport.call<SigninSelfServiceSignupSetResponse, O>(environmentOperations['signin.self_service_signup.set'], [], body, options),
+    },
+    sms: {
+      /**
+       * Read the SMS second-factor policy: whether text-message codes are accepted, for which countries, and the administrator rule.
+       *
+       * Requires scope `signin:read`. Danger: read.
+       *
+       * `GET /sign-in/sms` · action `signin.sms.get`
+       * @scope `signin:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      get: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<SigninSmsGetResponse, O>> =>
+        this.transport.call<SigninSmsGetResponse, O>(environmentOperations['signin.sms.get'], [], undefined, options),
+      /**
+       * Change the SMS second-factor policy: accept text-message codes or not, the countries they may go to, and whether SMS may be an administrator's only factor.
+       *
+       * Requires scope `signin:write`. Danger: critical.
+       *
+       * `PATCH /sign-in/sms` · action `signin.sms.update`
+       * @scope `signin:write`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(body?: SigninSmsUpdateBody, options?: O): Promise<Outcome<SigninSmsUpdateResponse, O>> =>
+        this.transport.call<SigninSmsUpdateResponse, O>(environmentOperations['signin.sms.update'], [], body, options),
     },
     social: {
       /**
@@ -6405,6 +8120,20 @@ export class EnvironmentClient {
        */
       reset: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<UsersMfaResetResponse, O>> =>
         this.transport.call<UsersMfaResetResponse, O>(environmentOperations['users.mfa.reset'], [id], undefined, options),
+      sms: {
+        /**
+         * Remove a user's phone number for text-message sign-in codes. Their other factors and recovery codes stay.
+         *
+         * Requires scope `users:write`. Danger: critical.
+         *
+         * `DELETE /users/{id}/mfa/sms` · action `users.mfa.sms.remove`
+         * @scope `users:write`
+         * @danger critical
+         * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+         */
+        remove: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<UsersMfaSmsRemoveResponse, O>> =>
+          this.transport.call<UsersMfaSmsRemoveResponse, O>(environmentOperations['users.mfa.sms.remove'], [id], undefined, options),
+      },
     },
     passwordReset: {
       /**

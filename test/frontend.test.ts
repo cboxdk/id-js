@@ -417,6 +417,61 @@ describe('CboxIdFrontend — second factor', () => {
   });
 });
 
+describe('CboxIdFrontend — texted codes', () => {
+  function client(fetchImpl: unknown) {
+    return new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as typeof fetch,
+    });
+  }
+
+  it('lists the factors the person can answer with, as kinds only', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      respond({ status: 'mfa_required', mfa_token: 'mt_abc', expires_in: 300, factors: ['totp', 'sms', 'recovery_code', 'carrier_pigeon'] }),
+    );
+
+    const result = await client(fetchImpl).signIn('ada@acme.test', 'pw');
+
+    // An unknown kind is dropped: a button for a factor the SDK cannot complete strands the person.
+    expect(result).toEqual({ status: 'mfa_required', mfaToken: 'mt_abc', factors: ['totp', 'sms', 'recovery_code'] });
+  });
+
+  it('sends the code on request and reports the masked number', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'sent', to: '+45 ******78', expires_in: 300 }));
+
+    const sent = await client(fetchImpl).sendSmsCode('mt_abc');
+
+    expect(sent).toEqual({ status: 'sent', to: '+45 ******78', expiresIn: 300 });
+    const [url, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(url).toBe('https://id.acme.test/frontend/v1/sign-in/factor/sms');
+    expect(init.headers['X-Cbox-Publishable-Key']).toBe('pk_live_abc');
+    expect(JSON.parse(init.body)).toEqual({ mfa_token: 'mt_abc' });
+  });
+
+  it('reports a rate limit with its wait, a provider failure, and a refusal', async () => {
+    const limited = vi.fn().mockResolvedValue(respond({ status: 'rate_limited', retry_after: 30 }, 429));
+    await expect(client(limited).sendSmsCode('mt_abc')).resolves.toEqual({ status: 'rate_limited', retryAfter: 30 });
+
+    const down = vi.fn().mockResolvedValue(respond({ status: 'unavailable' }, 503));
+    await expect(client(down).sendSmsCode('mt_abc')).resolves.toEqual({ status: 'unavailable' });
+
+    const refused = vi.fn().mockResolvedValue(respond({ status: 'invalid' }, 401));
+    await expect(client(refused).sendSmsCode('mt_abc')).resolves.toEqual({ status: 'invalid' });
+  });
+
+  it('submits the texted code as its own method', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(respond({ status: 'ok', login_ticket: 'lt_abc', expires_in: 60 }));
+
+    const result = await client(fetchImpl).submitSecondFactor('mt_abc', '123456', 'sms');
+
+    expect(result).toEqual({ status: 'ok', loginTicket: 'lt_abc', expiresIn: 60 });
+    const [url, init] = fetchImpl.mock.calls[0] ?? [];
+    expect(url).toBe('https://id.acme.test/frontend/v1/sign-in/factor');
+    expect(JSON.parse(init.body)).toEqual({ mfa_token: 'mt_abc', code: '123456', method: 'sms' });
+  });
+});
+
 describe('CboxIdFrontend — passkeys', () => {
   function client(fetchImpl: unknown) {
     return new CboxIdFrontend({
