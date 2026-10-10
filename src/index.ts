@@ -5,6 +5,7 @@ export { FrontendApiError } from './errors.js';
 export type {
   FrontendClientOptions,
   FrontendConfig,
+  FrontendConfigOptions,
   FrontendSession,
   SocialProvider,
   Appearance,

@@ -289,7 +289,10 @@ const frontend = new CboxIdFrontend({
 })
 
 const config = await frontend.config()
-// → endpoints, social buttons, and the customer's theme
+// → endpoints, social buttons, which methods are on, and the customer's theme
+
+// The buttons one organization's hosted page shows (by id or slug):
+const acme = await frontend.config({ organization: 'acme' })
 
 const { user } = await frontend.session(accessToken)
 // → { id, email, name } or null

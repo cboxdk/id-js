@@ -5,6 +5,8 @@ in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-10
+
 Needs laravel-id 1.24 / the Cbox ID release with feature flags, fine-grained
 authorization, Pipes and SMS as a second factor. Against an older instance the new claim
 reads as absent and the new endpoints answer 404.
@@ -19,7 +21,10 @@ reads as absent and the new endpoints answer 404.
   `evaluate({ user_id, organization_id })`), `env.fga.*` (check, `checkBatch`, tuples
   write/delete/list, resources and subjects lists, schema get/update/validate, with
   `consistency_token` on every read), `env.pipes.*` (pipe setup, grants, connections),
-  `env.radar.*`, `env.signin.sms.*`, `env.users.mfa.sms.remove()`, the HRIS directory
+  `env.radar.*`, `env.signin.sms.*`, the environment sign-in methods (`env.signin.social.*`
+  update/enable/disable/inherit/offered, `environment_wide` / `organization_id` on social
+  set, the auth policy's method fields), `env.branding.appearance.set()` taking the logo and
+  favicon as base64 data URIs, `env.users.mfa.sms.remove()`, the HRIS directory
   routes (`env.directories.*`), and on the account plane `me.mfa.sms.remove()` and
   `me.pipes.disconnect()`. `fgaTuple()` writes a tuple in the notation the batch check takes.
 - Pipes: `VaultClient.leasePipeToken(provider, { userId?, purpose })` leases a fresh token
@@ -28,6 +33,10 @@ reads as absent and the new endpoints answer 404.
   returnTo })`), `PipeTemporarilyUnavailableError` carries `retryAfter`,
   `PipeLeaseDeniedError` is the 403. `client.pipeConnectUrl(provider, returnTo)` and
   `pipeConnectUrl()` build the hosted connect page.
+- `CboxIdFrontend.config({ organization })`: the sign-in document for one organization (by
+  id or slug), whose `social` list is exactly what that organization's hosted page offers.
+  Each organization is cached on its own. `FrontendConfig.methods` says whether passkeys and
+  magic links are switched on.
 - Embedded sign-in: `mfa_required` lists the `factors` the person can answer with,
   `CboxIdFrontend.sendSmsCode(mfaToken)` texts the code, and `submitSecondFactor()` accepts
   `'sms'`.

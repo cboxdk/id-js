@@ -64,8 +64,27 @@ export interface FrontendConfig {
     end_session: string;
     jwks: string;
   };
+  /**
+   * The social buttons to draw, exactly as the hosted sign-in page would: the environment's
+   * own providers, or — with `config({ organization })` — that organization's.
+   */
   social: SocialProvider[];
   appearance?: Appearance;
+  /**
+   * Which other sign-in methods are switched on, so a box does not draw a button whose
+   * endpoint answers 403. Absent from instances that predate it.
+   */
+  methods?: { passkeys: boolean; magic_link: boolean };
+}
+
+/** Options for {@link CboxIdFrontend.config}. */
+export interface FrontendConfigOptions {
+  /**
+   * The organization the box is for, by id or slug — the way a hosted page is addressed.
+   * `social` is then exactly what that organization's sign-in page offers. An organization
+   * the environment does not have is answered as no hint at all.
+   */
+  organization?: string;
 }
 
 /**
@@ -151,7 +170,7 @@ export class CboxIdFrontend {
    * fetches of the same immutable document is a waste the SDK should absorb rather than
    * ask every consumer to.
    */
-  private configPromise: Promise<FrontendConfig> | null = null;
+  private readonly configPromises = new Map<string, Promise<FrontendConfig>>();
 
   constructor(options: FrontendClientOptions) {
     if (!options.issuer) {
@@ -191,16 +210,27 @@ export class CboxIdFrontend {
    * Fetched once per client instance. The document is small and changes when somebody
    * edits it in the console, so a long-lived page picks changes up on its next full load
    * rather than mid-session — which is the right trade for something that decides layout.
+   * Each `organization` is fetched and cached on its own.
    */
-  async config(): Promise<FrontendConfig> {
-    this.configPromise ??= this.get<FrontendConfig>('/frontend/v1/config', {}, isFrontendConfig).catch((error: unknown) => {
-      // Cleared so a transient network failure does not poison the instance for the
-      // lifetime of the page.
-      this.configPromise = null;
-      throw error;
-    });
+  async config(options: FrontendConfigOptions = {}): Promise<FrontendConfig> {
+    const organization = options.organization ?? '';
+    let pending = this.configPromises.get(organization);
 
-    return this.configPromise;
+    if (pending === undefined) {
+      const path = organization === ''
+        ? '/frontend/v1/config'
+        : `/frontend/v1/config?${new URLSearchParams({ organization }).toString()}`;
+
+      pending = this.get<FrontendConfig>(path, {}, isFrontendConfig).catch((error: unknown) => {
+        // Cleared so a transient network failure does not poison the instance for the
+        // lifetime of the page.
+        this.configPromises.delete(organization);
+        throw error;
+      });
+      this.configPromises.set(organization, pending);
+    }
+
+    return pending;
   }
 
   /**

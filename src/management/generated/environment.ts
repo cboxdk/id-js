@@ -531,6 +531,25 @@ export interface SignInRules {
   sso: 'off' | 'preferred' | 'required';
   /** Failed attempts before a lockout; null for none. */
   lockout_threshold: number | null;
+  /** Environment-wide. Whether passkeys may be used to sign in and be added. An organization's override never changes it. */
+  passkeys: boolean;
+  /** Environment-wide. Whether a one-time sign-in link may be emailed. */
+  magic_link: boolean;
+  /** Environment-wide. Minutes of inactivity before a session ends; null for the deployment's. */
+  session_idle_minutes: number | null;
+  /** Environment-wide. Minutes a session lasts at most; null for the deployment's. */
+  session_absolute_minutes: number | null;
+  /** Environment-wide. Whether a sign-up Radar flags is challenged with Turnstile, where the deployment has keys. */
+  bot_challenge: boolean;
+}
+
+export interface SignInMethodsInForce {
+  passkeys: boolean;
+  magic_link: boolean;
+  /** 0 for no idle timeout. */
+  session_idle_minutes: number;
+  session_absolute_minutes: number;
+  bot_challenge: boolean;
 }
 
 export interface SignInPolicy {
@@ -543,12 +562,22 @@ export interface SignInPolicy {
   override: SignInRules | null;
   /** True for an organization with no override of its own. */
   inheriting: boolean;
+  /** The environment-wide methods and session lengths actually in force, after the deployment's ceiling. */
+  in_force: SignInMethodsInForce;
+  /** The deployment's ceiling: which methods it offers at all, the longest sessions it allows, and whether it has Turnstile keys. */
+  deployment: SignInMethodsInForce;
 }
 
-/** Its client secret and private key are write-only and never returned. */
+/** Its client secret and private key are write-only and never returned. An environment provider (`level: environment`) is offered on every organization's sign-in page unless the organization has its own for the same provider or turned it off. */
 export interface SocialProvider {
   id: string;
+  /** null for the environment's own provider. */
   organization_id: string | null;
+  level: 'environment' | 'organization';
+  /** False when it is turned off; its credentials are kept. */
+  enabled: boolean;
+  /** Extra scopes requested on top of the ones sign-in needs. */
+  scopes: string[];
   /** The catalogue key: google, github, apple… */
   provider: string | null;
   name: string;
@@ -557,6 +586,22 @@ export interface SocialProvider {
   /** The redirect URI to register with the provider. */
   callback_uri: string;
   created_at?: string | null;
+}
+
+/** The social login buttons one sign-in page shows, after inheritance. */
+export interface OfferedSocialProviders {
+  /** null for the plain sign-in page, before anybody has said who they are. */
+  organization_id: string | null;
+  providers: Array<{
+    id: string;
+    provider: string | null;
+    name: string;
+    /** `environment` when inherited; `organization` when the organization's own stands in its place. */
+    source: 'environment' | 'organization';
+    callback_uri: string;
+  }>;
+  /** The environment's providers this organization turned off for its page. */
+  not_inherited: string[];
 }
 
 /** A publishable key. Returned in full: it is public by design; the origins are the control. */
@@ -647,7 +692,12 @@ export interface Appearance {
     light?: ThemeMode;
     dark?: ThemeMode;
   };
+  /** The uploaded logo, served by this application at /brand-assets/…; null when none is uploaded at this level. Never a remote URL. */
   logo: string | null;
+  /** The uploaded favicon, served the same way; null when none. */
+  favicon: string | null;
+  /** A remote logo URL saved before logos became uploads is still stored at this level. It is never fetched and no longer shown on any hosted page; upload a logo (or send `logo: null`) to clear it. */
+  remote_logo_ignored: boolean;
 }
 
 export interface WhitelabelBranding {
@@ -659,9 +709,9 @@ export interface WhitelabelBranding {
   app_name: string | null;
   email_from_name: string | null;
   email_template: string | null;
-  /** Uploaded from the console. */
+  /** Uploaded with `PUT /branding/appearance` (the console's Branding page). */
   logo_url: string | null;
-  /** Uploaded from the console. */
+  /** Uploaded with `PUT /branding/appearance` (the console's Branding page). */
   favicon_url: string | null;
 }
 
@@ -1985,7 +2035,7 @@ export interface BrandingAppearanceSetBody {
     preset?: string;
     /** Corner radius: 0rem, 0.25rem, 0.375rem, 0.5rem, 0.75rem, 1rem. */
     radius?: string;
-    /** Type family: system, geometric, serif. */
+    /** Type family: system, inter, geometric, rounded, serif. */
     font?: string;
     /** Colours as #rrggbb. One left out takes the preset's. */
     light?: {
@@ -2002,8 +2052,10 @@ export interface BrandingAppearanceSetBody {
       muted?: string;
     };
   };
-  /** An https URL for the logo; null removes it, left out keeps it. */
+  /** The logo as a base64 data: URI (data:image/png;base64,…): PNG, JPEG or WebP, at most 1024 KB and 4096px on the longest side. SVG and remote URLs are refused. Null removes it; left out keeps it. */
   logo?: string | null;
+  /** The favicon as a base64 data: URI (data:image/png;base64,…): PNG, ICO or WebP, at most 256 KB and 1024px on the longest side. SVG and remote URLs are refused. Null removes it; left out keeps it. */
+  favicon?: string | null;
 }
 
 /** Response body of `branding.appearance.set`. */
@@ -3818,6 +3870,16 @@ export interface SigninPolicyUpdateBody {
   sso?: 'off' | 'preferred' | 'required';
   /** Failed attempts before an account is locked; null for the deployment default (10 inside 15 minutes unless CBOX_ID_LOCKOUT_THRESHOLD says otherwise). */
   lockout_threshold?: number | null;
+  /** Environment only. Whether people may sign in with a passkey, and add one. Off at the deployment (CBOX_ID_PASSKEYS_ENABLED=false) stays off. */
+  passkeys?: boolean;
+  /** Environment only. Whether a one-time sign-in link may be emailed. Off at the deployment (CBOX_ID_MAGIC_LINK_ENABLED=false) stays off. */
+  magic_link?: boolean;
+  /** Environment only. Minutes of inactivity before a session ends; null for the deployment's. No more than the deployment allows (CBOX_ID_SESSION_IDLE_MINUTES). */
+  session_idle_minutes?: number | null;
+  /** Environment only. Minutes a session lasts at most, however active; null for the deployment's. No more than the deployment allows (CBOX_ID_SESSION_TTL_MINUTES). */
+  session_absolute_minutes?: number | null;
+  /** Environment only. Whether a sign-up Radar flags is asked to prove it is a person (Cloudflare Turnstile). Has no effect where the deployment has no Turnstile keys. */
+  bot_challenge?: boolean;
 }
 
 /** Response body of `signin.policy.update`. */
@@ -3865,10 +3927,47 @@ export interface SigninSocialDeleteBody {
 /** Response body of `signin.social.delete`. */
 export type SigninSocialDeleteResponse = void;
 
+/** Request body of `signin.social.disable`. */
+export interface SigninSocialDisableBody {
+  /** Only if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+}
+
+/** Response body of `signin.social.disable`. */
+export type SigninSocialDisableResponse = {
+  data: SocialProvider;
+};
+
+/** Request body of `signin.social.enable`. */
+export interface SigninSocialEnableBody {
+  /** Only if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+}
+
+/** Response body of `signin.social.enable`. */
+export type SigninSocialEnableResponse = {
+  data: SocialProvider;
+};
+
+/** Request body of `signin.social.inherit`. */
+export interface SigninSocialInheritBody {
+  /** The organization whose sign-in page this is about. */
+  organization_id: string;
+  /** False to stop offering the environment's provider on this organization's page; true to offer it again. */
+  offered: boolean;
+}
+
+/** Response body of `signin.social.inherit`. */
+export type SigninSocialInheritResponse = {
+  data: OfferedSocialProviders;
+};
+
 /** Query parameters of `signin.social.list`. */
 export interface SigninSocialListQuery {
-  /** Only this organization's providers. */
+  /** Only this organization's own providers (not the ones it inherits — see signin.social.offered). */
   organization_id?: string;
+  /** Only the environment's providers, which every organization inherits, or only organizations' own. */
+  level?: 'environment' | 'organization';
   /** Items per page, 1–100. Default 50. */
   limit?: number;
   /** The `next_cursor` of the previous page. */
@@ -3881,10 +3980,23 @@ export type SigninSocialListResponse = {
   meta: PageMeta;
 };
 
+/** Query parameters of `signin.social.offered`. */
+export interface SigninSocialOfferedQuery {
+  /** The organization whose sign-in page to resolve. Left out, the plain sign-in page, before anybody has said who they are. */
+  organization_id?: string;
+}
+
+/** Response body of `signin.social.offered`. */
+export type SigninSocialOfferedResponse = {
+  data: OfferedSocialProviders;
+};
+
 /** Request body of `signin.social.set`. */
 export interface SigninSocialSetBody {
-  /** The organization whose sign-in page offers it. */
-  organization_id: string;
+  /** The organization the provider belongs to. Send this or environment_wide. */
+  organization_id?: string | null;
+  /** True to make the provider the environment's own rather than one organization's. Send this or organization_id. */
+  environment_wide?: boolean;
   /** The catalogue key: google, microsoft, okta, auth0, keycloak, gitlab, slack, github, discord, apple, facebook, linkedin, bitbucket, xero, intuit. */
   provider: string;
   /** The client id from your own account with the provider. For Apple, the Services ID. */
@@ -3908,10 +4020,48 @@ export interface SigninSocialSetBody {
     /** Team ID (Apple). */
     team_id?: string | null;
   };
+  /** Extra scopes to request beyond the ones sign-in needs (for example `read:org` on GitHub). Replaces any extra scopes already set; an empty list removes them. */
+  scopes?: string[];
+  /** A ULID to create the provider under, so its redirect URI (which contains the id) can be registered with the provider first. Left out, one is minted. */
+  reserved_id?: string | null;
 }
 
 /** Response body of `signin.social.set`. */
 export type SigninSocialSetResponse = {
+  data: SocialProvider;
+};
+
+/** Request body of `signin.social.update`. */
+export interface SigninSocialUpdateBody {
+  /** Only change it if it is this organization's; anything else is a 404. */
+  organization_id?: string | null;
+  /** A new client id. For Apple, the Services ID. */
+  client_id?: string;
+  /** A new client secret. Write-only; left out or blank keeps the one on file. */
+  client_secret?: string | null;
+  /** What the chosen provider needs besides its client credentials — Microsoft's directory, Okta's domain, Apple's team id, key id and private key. */
+  parameters?: {
+    /** Directory (tenant) ID (Microsoft Entra ID). */
+    directory?: string | null;
+    /** Okta domain (Okta). */
+    domain?: string | null;
+    /** Keycloak host (Keycloak). */
+    host?: string | null;
+    /** Key ID (Apple). */
+    key_id?: string | null;
+    /** Private key (.p8) (Apple). */
+    private_key?: string | null;
+    /** Realm (Keycloak). */
+    realm?: string | null;
+    /** Team ID (Apple). */
+    team_id?: string | null;
+  };
+  /** Extra scopes to request beyond the ones sign-in needs (for example `read:org` on GitHub). Replaces any extra scopes already set; an empty list removes them. */
+  scopes?: string[];
+}
+
+/** Response body of `signin.social.update`. */
+export type SigninSocialUpdateResponse = {
   data: SocialProvider;
 };
 
@@ -4770,8 +4920,13 @@ export const environmentOperations = {
   'signin.sms.get': { action: 'signin.sms.get', operationId: 'signin_sms_get', method: 'GET', path: '/sign-in/sms', pathParams: [], scope: 'signin:read', danger: 'read', approval: true, body: false, pagination: null },
   'signin.sms.update': { action: 'signin.sms.update', operationId: 'signin_sms_update', method: 'PATCH', path: '/sign-in/sms', pathParams: [], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
   'signin.social.delete': { action: 'signin.social.delete', operationId: 'signin_social_delete', method: 'DELETE', path: '/sign-in/social-providers/{id}', pathParams: ['id'], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'signin.social.disable': { action: 'signin.social.disable', operationId: 'signin_social_disable', method: 'POST', path: '/sign-in/social-providers/{id}/disable', pathParams: ['id'], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'signin.social.enable': { action: 'signin.social.enable', operationId: 'signin_social_enable', method: 'POST', path: '/sign-in/social-providers/{id}/enable', pathParams: ['id'], scope: 'signin:write', danger: 'write', approval: true, body: true, pagination: null },
+  'signin.social.inherit': { action: 'signin.social.inherit', operationId: 'signin_social_inherit', method: 'PUT', path: '/sign-in/social-providers/inherited/{provider}', pathParams: ['provider'], scope: 'signin:write', danger: 'write', approval: true, body: true, pagination: null },
   'signin.social.list': { action: 'signin.social.list', operationId: 'signin_social_list', method: 'GET', path: '/sign-in/social-providers', pathParams: [], scope: 'signin:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'signin.social.offered': { action: 'signin.social.offered', operationId: 'signin_social_offered', method: 'GET', path: '/sign-in/social-providers/offered', pathParams: [], scope: 'signin:read', danger: 'read', approval: true, body: false, pagination: null },
   'signin.social.set': { action: 'signin.social.set', operationId: 'signin_social_set', method: 'POST', path: '/sign-in/social-providers', pathParams: [], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'signin.social.update': { action: 'signin.social.update', operationId: 'signin_social_update', method: 'PATCH', path: '/sign-in/social-providers/{id}', pathParams: ['id'], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
   'sod_policies.create': { action: 'sod_policies.create', operationId: 'sod_policies_create', method: 'POST', path: '/sod-policies', pathParams: [], scope: 'governance:write', danger: 'write', approval: true, body: true, pagination: null },
   'sod_policies.delete': { action: 'sod_policies.delete', operationId: 'sod_policies_delete', method: 'DELETE', path: '/sod-policies/{id}', pathParams: ['id'], scope: 'governance:write', danger: 'critical', approval: true, body: true, pagination: null },
   'sod_policies.get': { action: 'sod_policies.get', operationId: 'sod_policies_get', method: 'GET', path: '/sod-policies/{id}', pathParams: ['id'], scope: 'governance:read', danger: 'read', approval: true, body: false, pagination: null },
@@ -5562,7 +5717,7 @@ export class EnvironmentClient {
       get: <O extends CallOptions = CallOptions>(query?: BrandingAppearanceGetQuery, options?: O): Promise<Outcome<BrandingAppearanceGetResponse, O>> =>
         this.transport.call<BrandingAppearanceGetResponse, O>(environmentOperations['branding.appearance.get'], [], query, options),
       /**
-       * Set the hosted sign-in theme (preset, colours, corners, type, logo) for the environment default or one organization.
+       * Set the hosted sign-in theme (preset, colours, corners, type, uploaded logo and favicon) for the environment default or one organization.
        *
        * Requires scope `branding:write`. Danger: write.
        *
@@ -7422,7 +7577,7 @@ export class EnvironmentClient {
       inherit: <O extends CallOptions = CallOptions>(organizationId: string, options?: O): Promise<Outcome<SigninPolicyInheritResponse, O>> =>
         this.transport.call<SigninPolicyInheritResponse, O>(environmentOperations['signin.policy.inherit'], [organizationId], undefined, options),
       /**
-       * Change the authentication policy of the environment baseline, or tighten one organization's override. Requiring SSO signs out password sessions.
+       * Change the authentication policy of the environment baseline — including whether passkeys and magic links are offered and how long sessions last — or tighten one organization's override. Requiring SSO signs out password sessions.
        *
        * Requires scope `signin:write`. Danger: critical.
        *
@@ -7488,7 +7643,43 @@ export class EnvironmentClient {
       delete: <O extends CallOptions = CallOptions>(id: string, body?: SigninSocialDeleteBody, options?: O): Promise<Outcome<SigninSocialDeleteResponse, O>> =>
         this.transport.call<SigninSocialDeleteResponse, O>(environmentOperations['signin.social.delete'], [id], body, options),
       /**
-       * List the social login providers (Google, GitHub, Apple…) enabled in this environment, optionally for one organization.
+       * Turn a social login provider off without removing it. People who used it keep their accounts.
+       *
+       * Requires scope `signin:write`. Danger: critical.
+       *
+       * `POST /sign-in/social-providers/{id}/disable` · action `signin.social.disable`
+       * @scope `signin:write`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      disable: <O extends CallOptions = CallOptions>(id: string, body?: SigninSocialDisableBody, options?: O): Promise<Outcome<SigninSocialDisableResponse, O>> =>
+        this.transport.call<SigninSocialDisableResponse, O>(environmentOperations['signin.social.disable'], [id], body, options),
+      /**
+       * Turn a social login provider that was turned off back on, with the credentials it already has.
+       *
+       * Requires scope `signin:write`. Danger: write.
+       *
+       * `POST /sign-in/social-providers/{id}/enable` · action `signin.social.enable`
+       * @scope `signin:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      enable: <O extends CallOptions = CallOptions>(id: string, body?: SigninSocialEnableBody, options?: O): Promise<Outcome<SigninSocialEnableResponse, O>> =>
+        this.transport.call<SigninSocialEnableResponse, O>(environmentOperations['signin.social.enable'], [id], body, options),
+      /**
+       * Turn one of the environment's social login providers off (or back on) for one organization's sign-in page.
+       *
+       * Requires scope `signin:write`. Danger: write.
+       *
+       * `PUT /sign-in/social-providers/inherited/{provider}` · action `signin.social.inherit`
+       * @scope `signin:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      inherit: <O extends CallOptions = CallOptions>(provider: string, body: SigninSocialInheritBody, options?: O): Promise<Outcome<SigninSocialInheritResponse, O>> =>
+        this.transport.call<SigninSocialInheritResponse, O>(environmentOperations['signin.social.inherit'], [provider], body, options),
+      /**
+       * List the social login providers (Google, GitHub, Apple…) set up in this environment — the environment's own and organizations' — optionally for one organization.
        *
        * Requires scope `signin:read`. Danger: read.
        *
@@ -7503,7 +7694,19 @@ export class EnvironmentClient {
       listAll: (query?: Omit<SigninSocialListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<SocialProvider, void, undefined> =>
         this.transport.paginate(environmentOperations['signin.social.list'], [], query as Record<string, unknown> | undefined, options),
       /**
-       * Enable a social login provider (Google, GitHub, Apple…) for one organization with its client credentials. The secret is never returned.
+       * The social login buttons one organization's sign-in page shows (or the plain sign-in page's), after inheritance from the environment, with where each comes from.
+       *
+       * Requires scope `signin:read`. Danger: read.
+       *
+       * `GET /sign-in/social-providers/offered` · action `signin.social.offered`
+       * @scope `signin:read`
+       * @danger read
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      offered: <O extends CallOptions = CallOptions>(query?: SigninSocialOfferedQuery, options?: O): Promise<Outcome<SigninSocialOfferedResponse, O>> =>
+        this.transport.call<SigninSocialOfferedResponse, O>(environmentOperations['signin.social.offered'], [], query, options),
+      /**
+       * Enable a social login provider (Google, GitHub, Apple…) for the whole environment or for one organization, with its client credentials. The secret is never returned.
        *
        * Requires scope `signin:write`. Danger: critical.
        *
@@ -7514,6 +7717,18 @@ export class EnvironmentClient {
        */
       set: <O extends CallOptions = CallOptions>(body: SigninSocialSetBody, options?: O): Promise<Outcome<SigninSocialSetResponse, O>> =>
         this.transport.call<SigninSocialSetResponse, O>(environmentOperations['signin.social.set'], [], body, options),
+      /**
+       * Change a social login provider's client credentials, provider values or extra scopes. Secrets left out keep the ones on file.
+       *
+       * Requires scope `signin:write`. Danger: critical.
+       *
+       * `PATCH /sign-in/social-providers/{id}` · action `signin.social.update`
+       * @scope `signin:write`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(id: string, body?: SigninSocialUpdateBody, options?: O): Promise<Outcome<SigninSocialUpdateResponse, O>> =>
+        this.transport.call<SigninSocialUpdateResponse, O>(environmentOperations['signin.social.update'], [id], body, options),
     },
   };
 

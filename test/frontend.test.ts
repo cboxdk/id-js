@@ -417,6 +417,30 @@ describe('CboxIdFrontend — second factor', () => {
   });
 });
 
+describe('CboxIdFrontend — config for an organization', () => {
+  it('asks for an organization\'s buttons, and caches each organization on its own', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () =>
+      respond({ ...CONFIG, methods: { passkeys: true, magic_link: false } }),
+    );
+    const frontend = new CboxIdFrontend({
+      issuer: 'https://id.acme.test',
+      publishableKey: 'pk_live_abc',
+      fetch: fetchImpl as unknown as typeof fetch,
+    });
+
+    const plain = await frontend.config();
+    await frontend.config({ organization: 'acme corp' });
+    await frontend.config({ organization: 'acme corp' });
+    await frontend.config();
+
+    expect(fetchImpl.mock.calls.map((call) => call[0])).toEqual([
+      'https://id.acme.test/frontend/v1/config',
+      'https://id.acme.test/frontend/v1/config?organization=acme+corp',
+    ]);
+    expect(plain.methods).toEqual({ passkeys: true, magic_link: false });
+  });
+});
+
 describe('CboxIdFrontend — texted codes', () => {
   function client(fetchImpl: unknown) {
     return new CboxIdFrontend({
