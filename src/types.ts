@@ -220,6 +220,12 @@ export interface CboxUser {
   /** Permissions held in this session (`permissions` claim); empty when there are none. */
   permissions: string[];
   /**
+   * The keys of the feature flags on for this person in this organization (the
+   * `feature_flags` claim), or null when the claim is absent — the `feature_flags` scope
+   * was not requested. See `featureFlags()` / `hasFeature()`.
+   */
+  featureFlags: string[] | null;
+  /**
    * Set when this is a SUPPORT SESSION — a staff member acting as this person (the RFC
    * 8693 `act` claim). Null for an ordinary sign-in. Show it: see `isSupportSession()`.
    */

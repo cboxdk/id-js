@@ -3,7 +3,8 @@ import { Discovery } from './discovery.js';
 import { assertSecureIssuer } from './issuer.js';
 import { AuthenticationError, ConfigurationError, InvalidStateError, oauthError } from './errors.js';
 import { challenge, createVerifier, randomToken } from './pkce.js';
-import { actor, organization, permissions, roles, sessionId } from './claims.js';
+import { actor, featureFlags, organization, permissions, roles, sessionId } from './claims.js';
+import { pipeConnectUrl, type PipeProvider } from './vault.js';
 import type {
   AuthorizationPrompt,
   AuthorizationRequest,
@@ -298,6 +299,7 @@ export class CboxIdClient {
       organization: organization(claims),
       roles: roles(claims),
       permissions: permissions(claims),
+      featureFlags: featureFlags(claims),
       actor: actor(claims),
       sessionId: sessionId(claims),
       // Only present when the instance emitted the claim (exactOptionalPropertyTypes).
@@ -528,6 +530,19 @@ export class CboxIdClient {
    * registered. `organization` picks which of the person's organizations the keys act in;
    * omitted, the page uses the one they are in.
    */
+  /**
+   * The hosted page where the signed-in person connects their account at `provider`
+   * (Pipes) — `/account/connected-services/{provider}/connect`, preselected to this app.
+   * They come back to `returnTo` with `?provider=…&status=connected|cancelled|failed`,
+   * honoured only on an origin the app registered.
+   */
+  pipeConnectUrl(provider: PipeProvider | string, returnTo?: string): string {
+    return pipeConnectUrl(this.config.issuer, provider, {
+      clientId: this.config.clientId,
+      ...(returnTo !== undefined ? { returnTo } : {}),
+    });
+  }
+
   apiKeysUrl(options: { clientId?: string; returnTo?: string; organization?: string } = {}): string {
     const params = new URLSearchParams({ client_id: options.clientId ?? this.config.clientId });
     if (options.returnTo) {

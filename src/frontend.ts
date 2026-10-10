@@ -64,18 +64,67 @@ export interface FrontendConfig {
     end_session: string;
     jwks: string;
   };
+  /**
+   * The social buttons to draw, exactly as the hosted sign-in page would: the environment's
+   * own providers, or — with `config({ organization })` — that organization's.
+   */
   social: SocialProvider[];
   appearance?: Appearance;
+  /**
+   * Which other sign-in methods are switched on, so a box does not draw a button whose
+   * endpoint answers 403. Absent from instances that predate it.
+   */
+  methods?: { passkeys: boolean; magic_link: boolean };
 }
+
+/** Options for {@link CboxIdFrontend.config}. */
+export interface FrontendConfigOptions {
+  /**
+   * The organization the box is for, by id or slug — the way a hosted page is addressed.
+   * `social` is then exactly what that organization's sign-in page offers. An organization
+   * the environment does not have is answered as no hint at all.
+   */
+  organization?: string;
+}
+
+/**
+ * A second factor the person can answer an `mfa_required` with. Kinds only — the server
+ * never says which number a text would go to before one is sent.
+ */
+export type SecondFactorKind = 'totp' | 'sms' | 'recovery_code';
 
 /** What a sign-in attempt produced. */
 export type SignInResult =
   | { status: 'ok'; loginTicket: string; expiresIn: number }
-  | { status: 'mfa_required'; mfaToken: string }
+  | {
+      status: 'mfa_required';
+      mfaToken: string;
+      /**
+       * The factors this person can answer with (laravel-id 1.24+). Absent when the
+       * instance predates the list — then only an authenticator or a recovery code works.
+       */
+      factors?: SecondFactorKind[];
+    }
   | { status: 'otp_required'; mfaToken: string }
   | { status: 'sso_required' }
   | { status: 'invalid' }
   | { status: 'rate_limited'; retryAfter: number | undefined };
+
+/** What asking for a texted sign-in code produced. */
+export type SmsCodeResult =
+  /** Sent. `to` is the number masked (`+45 ******78`); the code lasts `expiresIn` seconds. */
+  | { status: 'sent'; to: string; expiresIn: number }
+  /** Too soon, or a sending limit was hit. Waiting `retryAfter` seconds may help. */
+  | { status: 'rate_limited'; retryAfter: number | undefined }
+  /** The text provider failed. Try again shortly, or offer another factor. */
+  | { status: 'unavailable' }
+  /**
+   * Refused: an unknown or spent token, no number on file, a country texts are not sent
+   * to, or no attempts left. One answer for every reason, like a wrong password.
+   */
+  | { status: 'invalid' };
+
+const SECOND_FACTOR_KINDS: ReadonlySet<string> = new Set<SecondFactorKind>(['totp', 'sms', 'recovery_code']);
 
 /** What a browser needs to ask an authenticator for a passkey assertion. */
 export interface PasskeyOptions {
@@ -121,7 +170,7 @@ export class CboxIdFrontend {
    * fetches of the same immutable document is a waste the SDK should absorb rather than
    * ask every consumer to.
    */
-  private configPromise: Promise<FrontendConfig> | null = null;
+  private readonly configPromises = new Map<string, Promise<FrontendConfig>>();
 
   constructor(options: FrontendClientOptions) {
     if (!options.issuer) {
@@ -161,16 +210,27 @@ export class CboxIdFrontend {
    * Fetched once per client instance. The document is small and changes when somebody
    * edits it in the console, so a long-lived page picks changes up on its next full load
    * rather than mid-session — which is the right trade for something that decides layout.
+   * Each `organization` is fetched and cached on its own.
    */
-  async config(): Promise<FrontendConfig> {
-    this.configPromise ??= this.get<FrontendConfig>('/frontend/v1/config', {}, isFrontendConfig).catch((error: unknown) => {
-      // Cleared so a transient network failure does not poison the instance for the
-      // lifetime of the page.
-      this.configPromise = null;
-      throw error;
-    });
+  async config(options: FrontendConfigOptions = {}): Promise<FrontendConfig> {
+    const organization = options.organization ?? '';
+    let pending = this.configPromises.get(organization);
 
-    return this.configPromise;
+    if (pending === undefined) {
+      const path = organization === ''
+        ? '/frontend/v1/config'
+        : `/frontend/v1/config?${new URLSearchParams({ organization }).toString()}`;
+
+      pending = this.get<FrontendConfig>(path, {}, isFrontendConfig).catch((error: unknown) => {
+        // Cleared so a transient network failure does not poison the instance for the
+        // lifetime of the page.
+        this.configPromises.delete(organization);
+        throw error;
+      });
+      this.configPromises.set(organization, pending);
+    }
+
+    return pending;
   }
 
   /**
@@ -229,7 +289,7 @@ export class CboxIdFrontend {
       return { status: 'rate_limited', retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined };
     }
 
-    let body: { status?: string; login_ticket?: string; mfa_token?: string; expires_in?: number };
+    let body: { status?: string; login_ticket?: string; mfa_token?: string; expires_in?: number; factors?: unknown };
 
     try {
       body = (await response.json()) as typeof body;
@@ -241,8 +301,18 @@ export class CboxIdFrontend {
       return { status: 'ok', loginTicket: body.login_ticket, expiresIn: body.expires_in ?? 60 };
     }
 
-    if ((body.status === 'mfa_required' || body.status === 'otp_required') && typeof body.mfa_token === 'string') {
-      return { status: body.status, mfaToken: body.mfa_token };
+    if (body.status === 'mfa_required' && typeof body.mfa_token === 'string') {
+      // Unknown kinds are dropped rather than passed on: a page that draws a button for a
+      // factor this SDK cannot complete strands the person on it.
+      const factors = Array.isArray(body.factors)
+        ? body.factors.filter((f): f is SecondFactorKind => typeof f === 'string' && SECOND_FACTOR_KINDS.has(f))
+        : undefined;
+
+      return { status: 'mfa_required', mfaToken: body.mfa_token, ...(factors ? { factors } : {}) };
+    }
+
+    if (body.status === 'otp_required' && typeof body.mfa_token === 'string') {
+      return { status: 'otp_required', mfaToken: body.mfa_token };
     }
 
     if (body.status === 'sso_required') {
@@ -262,8 +332,13 @@ export class CboxIdFrontend {
    *
    * A wrong code costs an attempt, not the sign-in: five are allowed before the token
    * dies and the person starts from the password again.
+   *
+   * `method` says which challenge the code answers: `'mfa'` for an authenticator or
+   * recovery code, `'otp'` for an emailed code (`otp_required`), `'sms'` for a code sent
+   * with {@link sendSmsCode}. A texted code is six digits like an authenticator's, so the
+   * server cannot tell them apart by shape — answering one as the other is refused.
    */
-  async submitSecondFactor(mfaToken: string, code: string, method: 'mfa' | 'otp' = 'mfa'): Promise<SignInResult> {
+  async submitSecondFactor(mfaToken: string, code: string, method: 'mfa' | 'otp' | 'sms' = 'mfa'): Promise<SignInResult> {
     const response = await this.post('/frontend/v1/sign-in/factor', { mfa_token: mfaToken, code, method });
 
     let body: { status?: string; login_ticket?: string; expires_in?: number };
@@ -277,6 +352,49 @@ export class CboxIdFrontend {
     return body.status === 'ok' && typeof body.login_ticket === 'string'
       ? { status: 'ok', loginTicket: body.login_ticket, expiresIn: body.expires_in ?? 60 }
       : { status: 'invalid' };
+  }
+
+  /**
+   * Text the person a sign-in code, when `mfa_required` listed `'sms'` in `factors`.
+   * Then finish with `submitSecondFactor(mfaToken, code, 'sms')`.
+   *
+   * Only call it when the person asks ("Text me a code"), never on page load: each send
+   * spends one of the token's five attempts — that is what bounds how many texts one
+   * proved password can cause — and every text costs the customer money.
+   *
+   * ```ts
+   * if (result.status === 'mfa_required' && result.factors?.includes('sms')) {
+   *   const sent = await frontend.sendSmsCode(result.mfaToken)
+   *   if (sent.status === 'sent') showCodeField(`We texted ${sent.to}`)
+   * }
+   * ```
+   */
+  async sendSmsCode(mfaToken: string): Promise<SmsCodeResult> {
+    const response = await this.post('/frontend/v1/sign-in/factor/sms', { mfa_token: mfaToken });
+
+    let body: { status?: string; to?: unknown; expires_in?: unknown; retry_after?: unknown };
+
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      throw new FrontendApiError('Cbox ID returned a body that is not JSON.', 'malformed', response.status);
+    }
+
+    if (body.status === 'sent' && typeof body.to === 'string') {
+      return { status: 'sent', to: body.to, expiresIn: typeof body.expires_in === 'number' ? body.expires_in : 300 };
+    }
+
+    if (body.status === 'rate_limited' || response.status === 429) {
+      const retryAfter = typeof body.retry_after === 'number' ? body.retry_after : Number(response.headers.get('Retry-After') ?? '');
+
+      return { status: 'rate_limited', retryAfter: Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined };
+    }
+
+    if (body.status === 'unavailable') {
+      return { status: 'unavailable' };
+    }
+
+    return { status: 'invalid' };
   }
 
   /**

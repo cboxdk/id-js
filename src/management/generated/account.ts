@@ -78,11 +78,17 @@ export type ApplicationsRevokeResponse = void;
 /** Response body of `devices.remove`. */
 export type DevicesRemoveResponse = void;
 
+/** Response body of `mfa.sms.remove`. */
+export type MfaSmsRemoveResponse = void;
+
 /** Response body of `organizations.leave`. */
 export type OrganizationsLeaveResponse = void;
 
 /** Response body of `passkeys.remove`. */
 export type PasskeysRemoveResponse = void;
+
+/** Response body of `pipes.disconnect`. */
+export type PipesDisconnectResponse = void;
 
 /** Request body of `profile.update`. */
 export interface ProfileUpdateBody {
@@ -115,8 +121,10 @@ export const accountOperations = {
   'account.api_keys.revoke': { action: 'account.api_keys.revoke', operationId: 'account_api_keys_revoke', method: 'DELETE', path: '/me/organizations/{organization_id}/api-keys/{key_id}', pathParams: ['organization_id', 'key_id'], scope: 'account:api_keys:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.applications.revoke': { action: 'account.applications.revoke', operationId: 'account_applications_revoke', method: 'DELETE', path: '/me/applications/{client_id}', pathParams: ['client_id'], scope: 'account:applications:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.devices.remove': { action: 'account.devices.remove', operationId: 'account_devices_remove', method: 'DELETE', path: '/me/devices/{device_id}', pathParams: ['device_id'], scope: 'account:devices:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'account.mfa.sms.remove': { action: 'account.mfa.sms.remove', operationId: 'account_mfa_sms_remove', method: 'DELETE', path: '/me/mfa/sms', pathParams: [], scope: 'account:sign_in:write', danger: 'critical', approval: true, body: false, pagination: null },
   'account.organizations.leave': { action: 'account.organizations.leave', operationId: 'account_organizations_leave', method: 'POST', path: '/me/organizations/{organization_id}/leave', pathParams: ['organization_id'], scope: 'account:organizations:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.passkeys.remove': { action: 'account.passkeys.remove', operationId: 'account_passkeys_remove', method: 'DELETE', path: '/me/passkeys/{passkey_id}', pathParams: ['passkey_id'], scope: 'account:sign_in:write', danger: 'critical', approval: true, body: false, pagination: null },
+  'account.pipes.disconnect': { action: 'account.pipes.disconnect', operationId: 'account_pipes_disconnect', method: 'DELETE', path: '/me/pipes/{provider}', pathParams: ['provider'], scope: 'account:pipes:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.profile.update': { action: 'account.profile.update', operationId: 'account_profile_update', method: 'PATCH', path: '/me/profile', pathParams: [], scope: 'account:profile:write', danger: 'write', approval: true, body: true, pagination: null },
   'account.sessions.revoke': { action: 'account.sessions.revoke', operationId: 'account_sessions_revoke', method: 'DELETE', path: '/me/sessions/{session_id}', pathParams: ['session_id'], scope: 'account:sessions:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.sessions.revoke_others': { action: 'account.sessions.revoke_others', operationId: 'account_sessions_revoke_others', method: 'POST', path: '/me/sessions/revoke-others', pathParams: [], scope: 'account:sessions:write', danger: 'critical', approval: true, body: false, pagination: null },
@@ -224,6 +232,23 @@ export class AccountClient {
       this.transport.call<DevicesRemoveResponse, O>(accountOperations['account.devices.remove'], [deviceId], undefined, options),
   };
 
+  readonly mfa = {
+    sms: {
+      /**
+       * Remove your phone number for text-message sign-in codes.
+       *
+       * Requires scope `account:sign_in:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: critical.
+       *
+       * `DELETE /me/mfa/sms` · action `account.mfa.sms.remove`
+       * @scope `account:sign_in:write`
+       * @danger critical
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      remove: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<MfaSmsRemoveResponse, O>> =>
+        this.transport.call<MfaSmsRemoveResponse, O>(accountOperations['account.mfa.sms.remove'], [], undefined, options),
+    },
+  };
+
   readonly organizations = {
     /**
      * Leave one of your own organizations. The last owner cannot leave — transfer ownership first.
@@ -252,6 +277,21 @@ export class AccountClient {
      */
     remove: <O extends CallOptions = CallOptions>(passkeyId: string, options?: O): Promise<Outcome<PasskeysRemoveResponse, O>> =>
       this.transport.call<PasskeysRemoveResponse, O>(accountOperations['account.passkeys.remove'], [passkeyId], undefined, options),
+  };
+
+  readonly pipes = {
+    /**
+     * Disconnect one of your connected services, revoking the access you gave it.
+     *
+     * Requires scope `account:pipes:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: destructive.
+     *
+     * `DELETE /me/pipes/{provider}` · action `account.pipes.disconnect`
+     * @scope `account:pipes:write`
+     * @danger destructive
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    disconnect: <O extends CallOptions = CallOptions>(provider: string, options?: O): Promise<Outcome<PipesDisconnectResponse, O>> =>
+      this.transport.call<PipesDisconnectResponse, O>(accountOperations['account.pipes.disconnect'], [provider], undefined, options),
   };
 
   readonly profile = {

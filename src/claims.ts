@@ -140,6 +140,38 @@ export function hasPermission(source: ClaimSource, permission: string): boolean 
 }
 
 /**
+ * The scope that puts the `feature_flags` claim on the ID token, the access token and
+ * UserInfo. Request it at sign-in (`scopes: ['openid', 'profile', FEATURE_FLAGS_SCOPE]`)
+ * and give the app the scope on its Scopes tab.
+ */
+export const FEATURE_FLAGS_SCOPE = 'feature_flags';
+
+/**
+ * The keys of the feature flags that are on for this person, in the organization the
+ * session is bound to — the `feature_flags` claim, sorted as the server sent it.
+ *
+ * NULL IS NOT EMPTY. `null` means the claim is absent: the `feature_flags` scope was not
+ * requested, or the instance predates it. `[]` means it was asked and nothing is on. A
+ * token carries the flags as they were when it was issued; the next refresh, or UserInfo,
+ * picks up a change.
+ */
+export function featureFlags(source: ClaimSource): string[] | null {
+  const claim = claimsOf(source)['feature_flags'];
+
+  return Array.isArray(claim) ? stringList(claim) : null;
+}
+
+/**
+ * Whether the feature flag `key` is on for this session. Exact match on the key.
+ *
+ * False when the claim is absent — an app that forgot to request the scope sees every
+ * feature off, never every feature on. Use {@link featureFlags} to tell the two apart.
+ */
+export function hasFeature(source: ClaimSource, key: string): boolean {
+  return featureFlags(source)?.includes(key) ?? false;
+}
+
+/**
  * Nesting is bounded: RFC 8693 chains are a handful deep in practice, and a claim nested
  * thousands deep is either a bug or an attempt to exhaust the stack. Past the bound the
  * chain is cut, not dropped — the session is still acted.
