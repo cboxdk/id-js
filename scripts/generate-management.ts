@@ -366,6 +366,17 @@ class Generator {
           break;
         }
 
+        // An action whose own answer is `202 Accepted` documents it as `oneOf` its body and
+        // the approval body. The branch that is not the approval is the result.
+        if (responseSchema === null && responses['202'] !== undefined && !['200', '201', '204'].some((c) => responses[c] !== undefined)) {
+          const response = this.#deref(responses['202'], 'responses');
+          const content = isRecord(response.content) ? response.content : {};
+          const json = content['application/json'];
+          const branches = isRecord(json) && isRecord(json.schema) && Array.isArray(json.schema.oneOf) ? json.schema.oneOf : [];
+          const own = branches.find((b) => isRecord(b) && !JSON.stringify(b).includes('approval_required'));
+          responseSchema = isRecord(own) ? own : null;
+        }
+
         const queryNames = new Set(query.map((p) => p.name));
 
         ops.push({

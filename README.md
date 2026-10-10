@@ -196,6 +196,29 @@ if (organization(user)?.role === 'owner') showBilling();
 Matching is exact — `invoices:*` does not grant `invoices:delete`. An `org_role` this SDK
 version does not recognise reads as `null`, never as a tier it would have to guess.
 
+### Feature flags
+
+Request the `feature_flags` scope (and give the app that scope on its Scopes tab) and the
+tokens and UserInfo carry the keys of every flag that is on for the person, in the
+organization they signed in to:
+
+```ts
+import { CboxIdClient, FEATURE_FLAGS_SCOPE, hasFeature } from '@cboxdk/id-js';
+
+const client = new CboxIdClient({ ...config, scopes: ['openid', 'profile', 'email', FEATURE_FLAGS_SCOPE] });
+
+user.featureFlags;                 // ['acme-beta', 'new-dashboard'] | null
+if (hasFeature(user, 'new-dashboard')) showNewDashboard();
+hasFeature(accessTokenPayload, 'billing.v2'); // works on a verified claim set too
+```
+
+`null` means the claim is absent — the scope was not requested — and `[]` means nothing is
+on. Either way `hasFeature()` is `false`: a missing scope turns every feature off, never on.
+A token carries the flags as they were when it was issued; the next refresh picks up a
+change. To ask without a token in hand (a job, a webhook handler), use
+`env.featureFlags.evaluate({ user_id, organization_id })` from the
+[Management API](#management-api).
+
 ### Support sessions
 
 A staff member can act as one of your users for a limited time (at most an hour, no refresh
@@ -352,6 +375,22 @@ if (result.status === 'mfa_required' || result.status === 'otp_required') {
   const method = result.status === 'otp_required' ? 'otp' : 'mfa'
   const done = await frontend.submitSecondFactor(result.mfaToken, code, method)
   // done.status === 'ok' → spend done.loginTicket exactly as above
+}
+```
+
+`mfa_required` also lists the `factors` the person can answer with — `'totp'`, `'sms'`,
+`'recovery_code'` (kinds only, never the number; absent from instances older than
+laravel-id 1.24). For a texted code, send it when the person asks, then submit it as
+`'sms'`:
+
+```ts
+if (result.status === 'mfa_required' && result.factors?.includes('sms')) {
+  // On "Text me a code" — never on page load: each send spends one of the token's five attempts.
+  const sent = await frontend.sendSmsCode(result.mfaToken)
+  if (sent.status === 'sent') showCodeField(`We texted ${sent.to}`) // '+45 ******78'
+  if (sent.status === 'rate_limited') showRetry(sent.retryAfter)
+  // later:
+  const done = await frontend.submitSecondFactor(result.mfaToken, code, 'sms')
 }
 ```
 
@@ -545,6 +584,33 @@ const lease = await agent.lease(secret.id, 'call openai');
 ```
 
 A lease with no live grant is refused — the vault is deny-by-default.
+
+### Pipes: a person's own GitHub, Google, Slack… token
+
+When a person has connected their account at a provider, lease a fresh access token for it
+with a `vault.lease` token. Cbox ID refreshes it first when it is about to expire:
+
+```ts
+import { PipeNotConnectedError, PipeReauthorizationRequiredError, PipeTemporarilyUnavailableError } from '@cboxdk/id-js';
+
+const vault = client.vault(await client.machineToken({ scopes: ['vault.lease'] }));
+
+try {
+  const { accessToken } = await vault.leasePipeToken('github', { userId, purpose: 'list-repos' });
+  // call https://api.github.com/user/repos with it, then drop it
+} catch (e) {
+  if (e instanceof PipeNotConnectedError || e instanceof PipeReauthorizationRequiredError) {
+    return redirect(e.connectUrlWith({ clientId, returnTo: 'https://app.acme.com/settings' }));
+  }
+  if (e instanceof PipeTemporarilyUnavailableError) return retryLater(e.retryAfter);
+  throw e; // PipeLeaseDeniedError: the app is not granted this pipe
+}
+```
+
+With a token issued for the person (they signed in to your app), leave `userId` out. To
+send somebody to connect before any lease, `client.pipeConnectUrl('github', returnTo)` is
+the hosted connect page, preselected to your app; they come back with
+`?provider=github&status=connected` (or `cancelled`, `failed`).
 
 ## Roles & permissions (federated RBAC)
 
@@ -748,6 +814,33 @@ for await (const org of env.organizations.listAll({ status: 'active' })) {
   console.log(org.id, org.name);
 }
 ```
+
+### Fine-grained authorization
+
+`env.fga.*` writes relationship tuples and asks checks. Every write answers with a
+`consistency_token`; pass it to a check that must see the write:
+
+```ts
+import { fgaTuple } from '@cboxdk/id-js/management';
+
+const { data: written } = await env.fga.tuples.write({
+  tuples: [{ resource_type: 'document', resource_id: 'leave', relation: 'viewer', subject: { type: 'user', id: 'alice' } }],
+});
+
+const { data } = await env.fga.check({
+  resource_type: 'document', resource_id: 'leave', relation: 'viewer',
+  subject_type: 'user', subject_id: 'alice',
+  consistency_token: written.consistency_token,
+});
+
+// Up to 100 at once, in the tuple notation, answered in order:
+await env.fga.checkBatch({ checks: ['document:leave#viewer@user:alice', 'document:readme#editor@user:alice'] });
+```
+
+`env.fga.tuples.delete()`, `env.fga.resources.list()` (which documents can alice view),
+`env.fga.subjects.list()` (who can view this one), and `env.fga.schema.get()` /
+`.update()` / `.validate()` complete it. `fgaTuple()` writes the notation from the same
+object `tuples.write` takes.
 
 ### Audit Logs
 

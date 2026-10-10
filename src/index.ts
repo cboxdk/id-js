@@ -9,6 +9,8 @@ export type {
   SocialProvider,
   Appearance,
   SignInResult,
+  SecondFactorKind,
+  SmsCodeResult,
   PasskeyOptions,
 } from './frontend.js';
 export { CboxIdClient } from './client.js';
@@ -16,8 +18,24 @@ export type { CallbackParams, StoredAuthState } from './client.js';
 export type { DeviceAuthorization } from './types.js';
 export { verifyWebhook, verifyStandardWebhook } from './webhook.js';
 export type { VerifyWebhookOptions, VerifyStandardWebhookOptions, WebhookHeaders } from './webhook.js';
-export { VaultClient } from './vault.js';
-export type { VaultSecretRef, VaultLease, StoreSecretInput } from './vault.js';
+export {
+  VaultClient,
+  pipeConnectUrl,
+  withConnectReturn,
+  PipeLeaseError,
+  PipeNotConnectedError,
+  PipeReauthorizationRequiredError,
+  PipeTemporarilyUnavailableError,
+  PipeLeaseDeniedError,
+} from './vault.js';
+export type {
+  VaultSecretRef,
+  VaultLease,
+  StoreSecretInput,
+  PipeProvider,
+  PipeToken,
+  PipeConnectOptions,
+} from './vault.js';
 export {
   CboxIdError,
   ConfigurationError,
@@ -34,6 +52,9 @@ export {
   permissions,
   hasRole,
   hasPermission,
+  featureFlags,
+  hasFeature,
+  FEATURE_FLAGS_SCOPE,
 } from './claims.js';
 export type {
   OrganizationRole,

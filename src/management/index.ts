@@ -58,6 +58,8 @@ export type {
   VerifyAuditChainOptions,
 } from './audit-logs.js';
 export type { DPoPSigner } from './dpop.js';
+export { fgaTuple } from './fga.js';
+export type { FgaSubjectRef, FgaTupleRef } from './fga.js';
 export type {
   ApiResponse,
   ApprovalContext,

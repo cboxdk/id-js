@@ -5,6 +5,38 @@ in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
 ## [Unreleased]
 
+Needs laravel-id 1.24 / the Cbox ID release with feature flags, fine-grained
+authorization, Pipes and SMS as a second factor. Against an older instance the new claim
+reads as absent and the new endpoints answer 404.
+
+### Added
+
+- Feature flags: `featureFlags(source)` and `hasFeature(source, key)` read the
+  `feature_flags` claim from a signed-in user or a verified claim set, and
+  `CboxUser.featureFlags` carries it (`null` when the scope was not requested, `[]` when
+  nothing is on). `FEATURE_FLAGS_SCOPE` is the scope to request.
+- Management API regenerated from the current specs: `env.featureFlags.*` (including
+  `evaluate({ user_id, organization_id })`), `env.fga.*` (check, `checkBatch`, tuples
+  write/delete/list, resources and subjects lists, schema get/update/validate, with
+  `consistency_token` on every read), `env.pipes.*` (pipe setup, grants, connections),
+  `env.radar.*`, `env.signin.sms.*`, `env.users.mfa.sms.remove()`, the HRIS directory
+  routes (`env.directories.*`), and on the account plane `me.mfa.sms.remove()` and
+  `me.pipes.disconnect()`. `fgaTuple()` writes a tuple in the notation the batch check takes.
+- Pipes: `VaultClient.leasePipeToken(provider, { userId?, purpose })` leases a fresh token
+  for a person's connected account. Refusals are typed: `PipeNotConnectedError` and
+  `PipeReauthorizationRequiredError` carry `connectUrl` (and `connectUrlWith({ clientId,
+  returnTo })`), `PipeTemporarilyUnavailableError` carries `retryAfter`,
+  `PipeLeaseDeniedError` is the 403. `client.pipeConnectUrl(provider, returnTo)` and
+  `pipeConnectUrl()` build the hosted connect page.
+- Embedded sign-in: `mfa_required` lists the `factors` the person can answer with,
+  `CboxIdFrontend.sendSmsCode(mfaToken)` texts the code, and `submitSecondFactor()` accepts
+  `'sms'`.
+
+### Changed
+
+- The generator reads an action's own `202 Accepted` body (documented as `oneOf` it and the
+  approval body), so `env.directories.sync()` now returns the directory.
+
 ## [0.18.0] - 2026-10-08
 
 ### Added
