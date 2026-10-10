@@ -150,3 +150,18 @@ describe('fgaTuple', () => {
     expect(() => fgaTuple({ resource_type: 'doc', resource_id: '', relation: 'viewer', subject: { type: 'user', id: 'x' } })).toThrow(TypeError);
   });
 });
+
+describe('an action that answers 202 Accepted', () => {
+  it('reads its own 202 body as the result, not as an approval', async () => {
+    const directory = { id: 'dir_1', name: 'Workday' };
+    const fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ data: directory }), { status: 202, headers: { 'content-type': 'application/json' } }),
+    );
+
+    const result = await env(fetch as unknown as typeof globalThis.fetch).directories.sync('dir_1', { full: true });
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe(202);
+    expect(result.data).toEqual(directory);
+  });
+});

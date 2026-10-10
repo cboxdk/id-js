@@ -366,6 +366,17 @@ class Generator {
           break;
         }
 
+        // An action whose own answer is `202 Accepted` documents it as `oneOf` its body and
+        // the approval body. The branch that is not the approval is the result.
+        if (responseSchema === null && responses['202'] !== undefined && !['200', '201', '204'].some((c) => responses[c] !== undefined)) {
+          const response = this.#deref(responses['202'], 'responses');
+          const content = isRecord(response.content) ? response.content : {};
+          const json = content['application/json'];
+          const branches = isRecord(json) && isRecord(json.schema) && Array.isArray(json.schema.oneOf) ? json.schema.oneOf : [];
+          const own = branches.find((b) => isRecord(b) && !JSON.stringify(b).includes('approval_required'));
+          responseSchema = isRecord(own) ? own : null;
+        }
+
         const queryNames = new Set(query.map((p) => p.name));
 
         ops.push({
@@ -397,19 +408,6 @@ class Generator {
 
     if (actions.length > 0 && actions.every((o) => o.name[0] === prefix && o.name.length > 2)) {
       for (const op of actions) op.name = op.name.slice(1);
-    }
-
-    // An action can be both a method and the namespace of another: `fga.check` and
-    // `fga.check.batch`. A member cannot be both, so the deeper one folds its last two
-    // segments together — `fga.checkBatch()` next to `fga.check()`.
-    const leaves = new Set(ops.map((o) => o.name.join('.')));
-
-    for (const op of ops) {
-      while (op.name.length > 2 && leaves.has(op.name.slice(0, -1).join('.'))) {
-        const leaf = op.name.pop()!;
-        const parent = op.name.pop()!;
-        op.name.push(`${parent}_${leaf}`);
-      }
     }
 
     return ops.sort((a, b) => a.name.join('.').localeCompare(b.name.join('.')));

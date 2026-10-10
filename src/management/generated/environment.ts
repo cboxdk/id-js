@@ -2249,7 +2249,9 @@ export interface DirectoriesSyncBody {
 }
 
 /** Response body of `directories.sync`. */
-export type DirectoriesSyncResponse = void;
+export type DirectoriesSyncResponse = {
+  data: Directory;
+};
 
 /** Request body of `directories.sync_settings.update`. */
 export interface DirectoriesSyncSettingsUpdateBody {
@@ -4658,7 +4660,7 @@ export const environmentOperations = {
   'feature_flags.list': { action: 'feature_flags.list', operationId: 'feature_flags_list', method: 'GET', path: '/feature-flags', pathParams: [], scope: 'feature_flags:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'feature_flags.update': { action: 'feature_flags.update', operationId: 'feature_flags_update', method: 'PATCH', path: '/feature-flags/{id}', pathParams: ['id'], scope: 'feature_flags:write', danger: 'write', approval: true, body: true, pagination: null },
   'fga.check': { action: 'fga.check', operationId: 'fga_check', method: 'GET', path: '/fga/check', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: null },
-  'fga.check.batch': { action: 'fga.check.batch', operationId: 'fga_check_batch', method: 'GET', path: '/fga/check/batch', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: null },
+  'fga.check_batch': { action: 'fga.check_batch', operationId: 'fga_check_batch', method: 'GET', path: '/fga/check/batch', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: null },
   'fga.resources.list': { action: 'fga.resources.list', operationId: 'fga_resources_list', method: 'GET', path: '/fga/resources', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'fga.schema.get': { action: 'fga.schema.get', operationId: 'fga_schema_get', method: 'GET', path: '/fga/schema', pathParams: [], scope: 'fga:read', danger: 'read', approval: true, body: false, pagination: null },
   'fga.schema.update': { action: 'fga.schema.update', operationId: 'fga_schema_update', method: 'PUT', path: '/fga/schema', pathParams: [], scope: 'fga:schema', danger: 'critical', approval: true, body: true, pagination: null },
@@ -5954,13 +5956,13 @@ export class EnvironmentClient {
      *
      * Requires scope `fga:read`. Danger: read.
      *
-     * `GET /fga/check/batch` · action `fga.check.batch`
+     * `GET /fga/check/batch` · action `fga.check_batch`
      * @scope `fga:read`
      * @danger read
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
     checkBatch: <O extends CallOptions = CallOptions>(query: FgaCheckBatchQuery, options?: O): Promise<Outcome<FgaCheckBatchResponse, O>> =>
-      this.transport.call<FgaCheckBatchResponse, O>(environmentOperations['fga.check.batch'], [], query, options),
+      this.transport.call<FgaCheckBatchResponse, O>(environmentOperations['fga.check_batch'], [], query, options),
     resources: {
       /**
        * List the resources of one type a subject has a relation on (e.g. every document alice can view), through all inheritance; sorted ids, paged with after.
