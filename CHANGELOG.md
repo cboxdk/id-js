@@ -3,7 +3,21 @@
 All notable changes to `@cboxdk/id-js` are recorded here. Earlier releases are described
 in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
-## [Unreleased]
+## [0.20.0] — prepared candidate, not published
+
+### Upgrade
+
+Workspace team.remove requires its body with roles_version. Team writes use roles arrays and current CAS versions. Re-read state on conflicts. Live permission checks bind subject, organization and app; access-token role projections alone do not authorize sensitive actions.
+
+### Added
+
+- `checkPermissions()` and `PermissionDecision` for current server authorization, bound to the exact subject, organization and app. Decisions are never cached; malformed, redirected, oversized or unavailable responses fail closed.
+- Updated management clients for multiple app roles, independent role and environment-access versions, scoped invitations and nullable member email.
+
+### Changed
+
+- Manifest publication requires a complete acknowledgement for the submitted client, version and checksum, including valid publication counts. Publishing definitions never assigns access.
+- Workspace member removal now requires `roles_version` and removes native ID app roles only. Role edits require `roles` and `roles_version`; environment access uses its separate version.
 
 ## [0.19.0] - 2026-10-10
 

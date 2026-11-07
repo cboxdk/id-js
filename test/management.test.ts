@@ -84,6 +84,35 @@ const held = (id = 'apr_1', pollUrl = `${API}/action-approvals/${id}`) =>
 const approvalStatus = (status: string, id = 'apr_1') => json({ data: { id, status } }, 200, { 'retry-after': '0' });
 
 describe('management client — requests', () => {
+  it('preserves the selected workspace and app-role version in a destructive DELETE body', async () => {
+    const { fetch, calls } = fakeFetch(new Response(null, { status: 204 }));
+    const client = new WorkspaceClient({ baseUrl: HOST, apiKey: 'cbid_ws_key', fetch });
+    await client.team.remove('member-a', { roles_version: 'roles-reviewed' }, { headers: { 'Cbox-Organization': 'org-selected' } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.method).toBe('DELETE');
+    expect(calls[0]!.url).toBe(`${API}/workspace/members/member-a`);
+    expect(calls[0]!.headers.get('Cbox-Organization')).toBe('org-selected');
+    expect(calls[0]!.body).toEqual({ roles_version: 'roles-reviewed' });
+  });
+
+  it('sends native multirole and independent row-access versions to the exact workspace', async () => {
+    const receipt = { id: 'invite-a', email: 'person@example.test', roles: ['viewer', 'billing'], status: 'invited' };
+    const member = { id: 'member-a', email: null, roles: ['viewer'], roles_version: 'roles-2', environment_access_version: 'rows-2' };
+    const { fetch, calls } = fakeFetch(json({ data: receipt }), json({ data: member }), json({ data: member }));
+    const client = new WorkspaceClient({ baseUrl: HOST, apiKey: 'cbid_ws_key', fetch });
+    const options = { headers: { 'Cbox-Organization': 'org-selected' } };
+    const invitation = await client.team.invite({ email: receipt.email, roles: ['viewer', 'billing'] }, options);
+    expect(invitation.data?.status).toBe('invited');
+    await client.team.role('member-a', { roles: ['viewer'], roles_version: 'roles-1' }, options);
+    const access = await client.team.environmentAccess('member-a', {
+      all_environments: false, environment_ids: ['environment-a'], environment_access_version: 'rows-1',
+    }, options);
+    expect(access.data.email).toBeNull();
+    expect(calls.map(call => call.headers.get('Cbox-Organization'))).toEqual(['org-selected', 'org-selected', 'org-selected']);
+    expect(calls[1]!.body).toEqual({ roles: ['viewer'], roles_version: 'roles-1' });
+    expect(calls[2]!.body).toEqual({ all_environments: false, environment_ids: ['environment-a'], environment_access_version: 'rows-1' });
+  });
+
   it('sends the key as a bearer token against {host}/api/v1 and unwraps the envelope', async () => {
     const { fetch, calls } = fakeFetch(json({ data: app }, 201));
     const result = await env(fetch).apps.create({ name: 'Billing', type: 'web' });

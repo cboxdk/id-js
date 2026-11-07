@@ -10,3 +10,5 @@ export {
   type ApiKeyVerifierConfig,
   type InactiveApiKey,
 } from './api-keys.js';
+export { checkPermissions, PermissionDecision } from './decisions.js';
+export type { PermissionDecisionConfig } from './decisions.js';

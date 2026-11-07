@@ -1,0 +1,9 @@
+{
+  "upstream_head": "e7004b59b1e7fcd1bd6b164e4a15f6676a193a8e",
+  "upstream_branch": "main",
+  "target_version": "0.20.0",
+  "status": "unpublished candidate based on actual upstream history",
+  "source_manifest": "evidence/id-js-final-source-hashes.json",
+  "publication_parent": "18e5beec603f90a94a01b0369250d5a264bb8890",
+  "restored_public_files": []
+}

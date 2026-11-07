@@ -6,6 +6,25 @@ import type { CallOptions, OperationSpec, Outcome } from '../types.js';
 
 // ── Schemas (components.schemas) ────────────────────────────────────────────────────────────
 
+export interface OrganizationServiceGrant {
+  id: string;
+  organization_id: string;
+  service: string;
+  consumer_client_id: string;
+  audience: string;
+  scopes: string[];
+  revoked_at: string | null;
+}
+
+export interface UserPropertySnapshot {
+  user_id: string;
+  namespace: string;
+  data: {
+    [key: string]: unknown;
+  };
+  version: number;
+}
+
 /** A management key of this environment. `token` is present once, on the answer that minted it, and never again. */
 export interface ManagementKey {
   id: string;
@@ -108,11 +127,13 @@ export interface Approval {
   organization_id?: string | null;
   requested_at?: string | null;
   expires_at?: string | null;
+  status?: 'pending' | 'approved' | 'denied' | 'expired' | 'reported';
+  purpose?: string;
 }
 
 export interface ApprovalDecision {
   id: string;
-  status: 'approved' | 'denied';
+  status: 'approved' | 'denied' | 'reported';
 }
 
 export interface VaultSecret {
@@ -180,6 +201,9 @@ export interface Invitation {
   role: 'owner' | 'admin' | 'developer' | 'member' | 'viewer';
   /** Ids of the access roles granted when the invitation is accepted. */
   roles: string[];
+  /** The subject that accepted this invitation. Null for pending or historical invitations without a receipt. */
+  accepted_by?: string | null;
+  accepted_at?: string | null;
   status: 'pending' | 'accepted' | 'revoked';
   /** The app it came from. */
   client_id?: string | null;
@@ -205,7 +229,17 @@ export interface Role {
    */
   tenant_assignable: boolean;
   permissions: string[];
+  /** The activated app definition. Publishing a new manifest does not change existing holders' permissions. */
+  active_definition_version?: string | null;
+  /** A published change waiting for an environment administrator to explicitly activate this version. */
+  pending_definition?: {
+    version: string;
+    permissions: string[];
+    tenant_assignable: boolean;
+  } | null;
 }
+
+export type RoleAssignments = RoleAssignment[];
 
 export interface RoleAssignment {
   role_id: string;
@@ -1612,6 +1646,57 @@ export type ApisUpdateResponse = {
   data: Api;
 };
 
+/** Request body of `app_catalog.delete`. */
+export interface AppCatalogDeleteBody {
+  version: number;
+}
+
+/** Response body of `app_catalog.delete`. */
+export type AppCatalogDeleteResponse = void;
+
+/** Response body of `app_catalog.list`. */
+export type AppCatalogListResponse = {
+  data: Array<{
+    key: string;
+    name: string;
+    description: string | null;
+    launch_url: string;
+    icon_url: string | null;
+    position: number;
+    version: number;
+  }>;
+};
+
+/** Request body of `app_catalog.save`. */
+export interface AppCatalogSaveBody {
+  version: number;
+  name: string;
+  description?: string | null;
+  /** Explicit HTTPS entry point. Never inferred from OAuth redirects. */
+  launch_url: string;
+  enabled: boolean;
+  position: number;
+  audience: 'everyone' | 'organizations' | 'users';
+  organization_ids?: string[];
+  user_ids?: string[];
+  /** Environment-wide OAuth client ids associated with this app. Does not grant access. */
+  client_ids?: string[];
+  /** Optional feature-flag key. Hidden when off for this person and organization. */
+  required_feature?: string | null;
+  /** PNG, JPEG or WebP data URI, up to 128 KiB and 512 pixels. Omit to retain; null clears. SVG and remote URLs are refused. */
+  icon?: string | null;
+}
+
+/** Response body of `app_catalog.save`. */
+export type AppCatalogSaveResponse = {
+  data: Record<string, unknown>;
+};
+
+/** Response body of `app_catalog.show`. */
+export type AppCatalogShowResponse = {
+  data: Record<string, unknown>;
+};
+
 /** Response body of `approvals.deny`. */
 export type ApprovalsDenyResponse = void;
 
@@ -1762,6 +1847,16 @@ export interface AppsSettingsBackchannelLogoutBody {
 
 /** Response body of `apps.settings.backchannel_logout`. */
 export type AppsSettingsBackchannelLogoutResponse = {
+  data: App;
+};
+
+/** Request body of `apps.settings.client_credentials`. */
+export interface AppsSettingsClientCredentialsBody {
+  enabled: boolean;
+}
+
+/** Response body of `apps.settings.client_credentials`. */
+export type AppsSettingsClientCredentialsResponse = {
   data: App;
 };
 
@@ -2012,6 +2107,14 @@ export interface AuditListQuery {
 export type AuditListResponse = {
   data: AuditEntry[];
   meta: PageMeta;
+};
+
+/** Response body of `authenticator.me.list`. */
+export type AuthenticatorMeListResponse = {
+  data: {
+    subject: string;
+    label: string;
+  };
 };
 
 /** Query parameters of `branding.appearance.get`. */
@@ -2799,6 +2902,11 @@ export type HooksUpdateResponse = {
   data: InlineHook;
 };
 
+/** Response body of `invitations.get`. */
+export type InvitationsGetResponse = {
+  data: Invitation;
+};
+
 /** Query parameters of `invitations.list`. */
 export interface InvitationsListQuery {
   limit?: number;
@@ -3058,6 +3166,19 @@ export type MembersAddResponse = {
   data: Member;
 };
 
+/** Request body of `members.apps.roles.replace`. */
+export interface MembersAppsRolesReplaceBody {
+  /** SHA-256 of the JSON array of current role ids for this app, sorted lexicographically. Read member roles first. */
+  version: string;
+  /** Manifest keys to assign. An empty list removes manual access to this app. */
+  roles: string[];
+}
+
+/** Response body of `members.apps.roles.replace`. */
+export type MembersAppsRolesReplaceResponse = {
+  data: RoleAssignments;
+};
+
 /** Query parameters of `members.list`. */
 export interface MembersListQuery {
   limit?: number;
@@ -3210,7 +3331,7 @@ export interface OrganizationsPortalLinksCreateBody {
   /** Mail the link to this address — the customer's IT contact. Left out, nothing is sent. */
   email?: string | null;
   /** The language of that mail. Left out, the environment's default language. */
-  locale?: 'en' | 'da' | 'de' | 'sv' | 'nb' | 'fr' | null;
+  locale?: 'en' | 'da' | 'de' | 'sv' | 'nb' | 'fr' | 'fi' | 'es' | 'it' | 'nl' | 'pt' | 'pl' | 'ro' | 'cs' | 'hu' | 'el' | 'bg' | 'hr' | 'sk' | 'tr' | 'uk' | null;
 }
 
 /** Response body of `organizations.portal_links.create`. */
@@ -3710,6 +3831,16 @@ export type RolesCreateResponse = {
   data: Role;
 };
 
+/** Request body of `roles.definition.activate`. */
+export interface RolesDefinitionActivateBody {
+  version: string;
+}
+
+/** Response body of `roles.definition.activate`. */
+export type RolesDefinitionActivateResponse = {
+  data: Role;
+};
+
 /** Response body of `roles.delete`. */
 export type RolesDeleteResponse = void;
 
@@ -3836,6 +3967,64 @@ export interface SamlAppsUpdateBody {
 /** Response body of `saml_apps.update`. */
 export type SamlAppsUpdateResponse = {
   data: SamlApp;
+};
+
+/** Query parameters of `signals.source.erasures.list`. */
+export interface SignalsSourceErasuresListQuery {
+  after?: string;
+  limit?: number;
+}
+
+/** Response body of `signals.source.erasures.list`. */
+export type SignalsSourceErasuresListResponse = {
+  data: Array<Record<string, unknown>>;
+  meta: {
+    next_cursor: string;
+    has_more: boolean;
+    commit_through: string;
+    generation: string;
+  };
+};
+
+/** Query parameters of `signals.source.list`. */
+export interface SignalsSourceListQuery {
+  after?: string;
+  limit?: number;
+}
+
+/** Response body of `signals.source.list`. */
+export type SignalsSourceListResponse = {
+  data: Array<{
+    contract_version: '2.0.0';
+    id: string;
+    producer_environment: string;
+    organization_id: string | null;
+    position: {
+      source_id: string;
+      partition: '0';
+      generation: string;
+      sequence: string;
+    };
+    kind: 'event' | 'relation';
+    name?: 'identity.authentication' | 'identity.session' | 'identity.token' | 'identity.account' | 'identity.activity';
+    occurred_at: string;
+    recorded_at: string;
+    data?: Record<string, unknown>;
+  }>;
+  meta: {
+    next_cursor: string;
+    has_more: boolean;
+    source_id: string;
+    generation: string;
+    commit_through: string;
+    accepted_through: string;
+    capture_started_at: string;
+    heartbeat_at: string | null;
+    observed_at: string;
+    families: string[];
+    retention_days: number;
+    coverage: 'partial';
+  };
 };
 
 /** Query parameters of `signin.policy.get`. */
@@ -4499,6 +4688,26 @@ export type TokenVaultSecretsRotateResponse = {
   data: TokenVaultSecret;
 };
 
+/** Request body of `user_property_namespaces.configure`. */
+export interface UserPropertyNamespacesConfigureBody {
+  /** OAuth client ids allowed to read. Omit or use an empty list to revoke all access. */
+  readers?: string[];
+  /** Reader client ids also allowed to write. */
+  writers?: string[];
+  /** Map webhook endpoint ids to reader client ids. Omit to remove all webhook grants. */
+  webhooks?: Record<string, unknown>;
+}
+
+/** Response body of `user_property_namespaces.configure`. */
+export type UserPropertyNamespacesConfigureResponse = {
+  data: Record<string, unknown>;
+};
+
+/** Response body of `user_property_namespaces.show`. */
+export type UserPropertyNamespacesShowResponse = {
+  data: Record<string, unknown>;
+};
+
 /** Request body of `users.create`. */
 export interface UsersCreateBody {
   email: string;
@@ -4653,7 +4862,7 @@ export interface WebhooksCreateBody {
   /** A public HTTPS URL. Signed deliveries are POSTed here. */
   url: string;
   /** The events it receives. */
-  event_types: Array<'user.created' | 'user.updated' | 'user.deactivated' | 'user.login' | 'user.reactivated' | 'identity.linked' | 'user.erased' | 'organization.created' | 'organization.suspended' | 'organization.reactivated' | 'organization.updated' | 'organization.deleted' | 'membership.created' | 'membership.updated' | 'membership.deleted' | 'invitation.created' | 'invitation.accepted' | 'invitation.revoked' | 'role.assigned' | 'role.unassigned' | 'role.assigned_everywhere' | 'role.unassigned_everywhere' | 'api_key.created' | 'api_key.revoked' | 'support_session.started' | 'directory.user.provisioned' | 'directory.user.deprovisioned' | 'directory.user.deactivated' | 'directory.group.membership_changed' | 'domain.added' | 'domain.removed' | 'domain.verified' | 'connection.activated' | 'connection.certificate_expiring' | 'entitlement.set' | 'entitlement.updated' | 'entitlement.revoked' | 'vault.grant.created' | 'vault.grant.revoked' | 'vault.secret.revoked' | 'pipe.connection.connected' | 'pipe.connection.needs_reauth' | 'pipe.connection.disconnected' | 'governance.access.revoked' | 'feature_flag.created' | 'feature_flag.updated' | 'feature_flag.deleted'>;
+  event_types: Array<'user.created' | 'user.updated' | 'user.preferences.updated' | 'user.metadata.updated' | 'user.deactivated' | 'user.login' | 'user.reactivated' | 'identity.linked' | 'user.erased' | 'organization.created' | 'organization.suspended' | 'organization.reactivated' | 'organization.updated' | 'organization.deleted' | 'membership.created' | 'membership.updated' | 'membership.deleted' | 'invitation.created' | 'invitation.accepted' | 'invitation.revoked' | 'role.assigned' | 'role.unassigned' | 'role.assigned_everywhere' | 'role.unassigned_everywhere' | 'api_key.created' | 'api_key.revoked' | 'support_session.started' | 'directory.user.provisioned' | 'directory.user.deprovisioned' | 'directory.user.deactivated' | 'directory.group.membership_changed' | 'domain.added' | 'domain.removed' | 'domain.verified' | 'connection.activated' | 'connection.certificate_expiring' | 'entitlement.set' | 'entitlement.updated' | 'entitlement.revoked' | 'vault.grant.created' | 'vault.grant.revoked' | 'vault.secret.revoked' | 'pipe.connection.connected' | 'pipe.connection.needs_reauth' | 'pipe.connection.disconnected' | 'governance.access.revoked' | 'feature_flag.created' | 'feature_flag.updated' | 'feature_flag.deleted'>;
   /** How deliveries are signed: `cbox` (X-Cbox-Signature, the default) or `standard_webhooks` (webhook-id / webhook-timestamp / webhook-signature, verifiable with any Standard Webhooks library; the secret is a `whsec_` secret). */
   signature_scheme?: 'cbox' | 'standard_webhooks';
   /** The organization it belongs to; it carries that organization's traffic only. Send this or environment_wide. */
@@ -4748,6 +4957,10 @@ export const environmentOperations = {
   'apis.scopes.define': { action: 'apis.scopes.define', operationId: 'apis_scopes_define', method: 'PUT', path: '/apis/{id}/scopes/{key}', pathParams: ['id', 'key'], scope: 'apis:write', danger: 'write', approval: true, body: true, pagination: null },
   'apis.scopes.remove': { action: 'apis.scopes.remove', operationId: 'apis_scopes_remove', method: 'DELETE', path: '/apis/{id}/scopes/{key}', pathParams: ['id', 'key'], scope: 'apis:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'apis.update': { action: 'apis.update', operationId: null, method: 'PATCH', path: '/apis/{id}', pathParams: ['id'], scope: 'apis:write', danger: 'write', approval: true, body: true, pagination: null },
+  'app_catalog.delete': { action: 'app_catalog.delete', operationId: 'app_catalog_delete', method: 'DELETE', path: '/app-catalog/{key}', pathParams: ['key'], scope: 'app_catalog:write', danger: 'destructive', approval: true, body: true, pagination: null },
+  'app_catalog.list': { action: 'app_catalog.list', operationId: 'app_catalog_list', method: 'GET', path: '/app-catalog', pathParams: [], scope: 'app_catalog:read', danger: 'read', approval: true, body: false, pagination: null },
+  'app_catalog.save': { action: 'app_catalog.save', operationId: 'app_catalog_save', method: 'PUT', path: '/app-catalog/{key}', pathParams: ['key'], scope: 'app_catalog:write', danger: 'write', approval: true, body: true, pagination: null },
+  'app_catalog.show': { action: 'app_catalog.show', operationId: 'app_catalog_show', method: 'GET', path: '/app-catalog/{key}', pathParams: ['key'], scope: 'app_catalog:read', danger: 'read', approval: true, body: false, pagination: null },
   'approvals.deny': { action: 'approvals.deny', operationId: 'approvals_deny', method: 'POST', path: '/agent-requests/{request_id}/deny', pathParams: ['request_id'], scope: 'approvals:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'approvals.list': { action: 'approvals.list', operationId: 'approvals_list', method: 'GET', path: '/agent-requests', pathParams: [], scope: 'approvals:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'apps.blueprint': { action: 'apps.blueprint', operationId: 'apps_blueprint', method: 'GET', path: '/apps/{id}/blueprint', pathParams: ['id'], scope: 'apps:read', danger: 'read', approval: true, body: false, pagination: null },
@@ -4764,6 +4977,7 @@ export const environmentOperations = {
   'apps.secrets.rotate': { action: 'apps.secrets.rotate', operationId: 'apps_secrets_rotate', method: 'POST', path: '/apps/{id}/secrets', pathParams: ['id'], scope: 'apps:write', danger: 'critical', approval: true, body: true, pagination: null },
   'apps.settings.api_key_prefix': { action: 'apps.settings.api_key_prefix', operationId: 'apps_settings_api_key_prefix', method: 'PUT', path: '/apps/{id}/settings/api-key-prefix', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
   'apps.settings.backchannel_logout': { action: 'apps.settings.backchannel_logout', operationId: 'apps_settings_backchannel_logout', method: 'PUT', path: '/apps/{id}/settings/backchannel-logout', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
+  'apps.settings.client_credentials': { action: 'apps.settings.client_credentials', operationId: 'apps_settings_client_credentials', method: 'PUT', path: '/apps/{id}/settings/client-credentials', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
   'apps.settings.token_exchange': { action: 'apps.settings.token_exchange', operationId: 'apps_settings_token_exchange', method: 'PUT', path: '/apps/{id}/settings/token-exchange', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
   'apps.settings.token_lifetime': { action: 'apps.settings.token_lifetime', operationId: 'apps_settings_token_lifetime', method: 'PUT', path: '/apps/{id}/settings/token-lifetime', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
   'apps.update': { action: 'apps.update', operationId: 'apps_update', method: 'PATCH', path: '/apps/{id}', pathParams: ['id'], scope: 'apps:write', danger: 'write', approval: true, body: true, pagination: null },
@@ -4780,6 +4994,7 @@ export const environmentOperations = {
   'audit_logs.settings.update': { action: 'audit_logs.settings.update', operationId: 'audit_logs_settings_update', method: 'PATCH', path: '/audit-logs/settings', pathParams: [], scope: 'audit_logs:manage', danger: 'destructive', approval: true, body: true, pagination: null },
   'audit_logs.verify': { action: 'audit_logs.verify', operationId: 'audit_logs_verify', method: 'GET', path: '/audit-logs/verify', pathParams: [], scope: 'audit_logs:read', danger: 'read', approval: true, body: false, pagination: null },
   'audit.list': { action: 'audit.list', operationId: 'audit_list', method: 'GET', path: '/audit-log', pathParams: [], scope: 'audit:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
+  'authenticator.me.list': { action: null, operationId: 'authenticatorIdentity', method: 'GET', path: '/authenticator/me', pathParams: [], scope: null, danger: null, approval: false, body: false, pagination: null },
   'branding.appearance.get': { action: 'branding.appearance.get', operationId: 'branding_appearance_get', method: 'GET', path: '/branding/appearance', pathParams: [], scope: 'branding:read', danger: 'read', approval: true, body: false, pagination: null },
   'branding.appearance.set': { action: 'branding.appearance.set', operationId: 'branding_appearance_set', method: 'PUT', path: '/branding/appearance', pathParams: [], scope: 'branding:write', danger: 'write', approval: true, body: true, pagination: null },
   'branding.whitelabel.get': { action: 'branding.whitelabel.get', operationId: 'branding_whitelabel_get', method: 'GET', path: '/branding/whitelabel', pathParams: [], scope: 'branding:read', danger: 'read', approval: true, body: false, pagination: null },
@@ -4828,6 +5043,7 @@ export const environmentOperations = {
   'hooks.get': { action: 'hooks.get', operationId: 'hooks_get', method: 'GET', path: '/hooks/{id}', pathParams: ['id'], scope: 'hooks:read', danger: 'read', approval: true, body: false, pagination: null },
   'hooks.list': { action: 'hooks.list', operationId: 'hooks_list', method: 'GET', path: '/hooks', pathParams: [], scope: 'hooks:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'hooks.update': { action: 'hooks.update', operationId: 'hooks_update', method: 'PATCH', path: '/hooks/{id}', pathParams: ['id'], scope: 'hooks:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'invitations.get': { action: 'invitations.get', operationId: 'invitations_get', method: 'GET', path: '/organizations/{organization_id}/invitations/{invitation_id}', pathParams: ['organization_id', 'invitation_id'], scope: 'invitations:read', danger: 'read', approval: true, body: false, pagination: null },
   'invitations.list': { action: 'invitations.list', operationId: 'invitations_list', method: 'GET', path: '/organizations/{organization_id}/invitations', pathParams: ['organization_id'], scope: 'invitations:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'invitations.resend': { action: 'invitations.resend', operationId: 'invitations_resend', method: 'POST', path: '/organizations/{organization_id}/invitations/{invitation_id}/resend', pathParams: ['organization_id', 'invitation_id'], scope: 'invitations:write', danger: 'write', approval: true, body: false, pagination: null },
   'invitations.revoke': { action: 'invitations.revoke', operationId: 'invitations_revoke', method: 'DELETE', path: '/organizations/{organization_id}/invitations/{invitation_id}', pathParams: ['organization_id', 'invitation_id'], scope: 'invitations:write', danger: 'destructive', approval: true, body: false, pagination: null },
@@ -4847,6 +5063,7 @@ export const environmentOperations = {
   'log_streams.test': { action: 'log_streams.test', operationId: 'log_streams_test', method: 'POST', path: '/log-streams/{id}/test', pathParams: ['id'], scope: 'log_streams:write', danger: 'write', approval: true, body: false, pagination: null },
   'log_streams.update': { action: 'log_streams.update', operationId: 'log_streams_update', method: 'PATCH', path: '/log-streams/{id}', pathParams: ['id'], scope: 'log_streams:write', danger: 'critical', approval: true, body: true, pagination: null },
   'members.add': { action: 'members.add', operationId: 'members_add', method: 'POST', path: '/organizations/{organization_id}/members', pathParams: ['organization_id'], scope: 'members:write', danger: 'write', approval: true, body: true, pagination: null },
+  'members.apps.roles.replace': { action: 'members.apps.roles.replace', operationId: 'members_apps_roles_replace', method: 'PUT', path: '/organizations/{organization_id}/members/{user_id}/apps/{client_id}/roles', pathParams: ['organization_id', 'user_id', 'client_id'], scope: 'roles:write', danger: 'write', approval: true, body: true, pagination: null },
   'members.list': { action: 'members.list', operationId: 'members_list', method: 'GET', path: '/organizations/{organization_id}/members', pathParams: ['organization_id'], scope: 'members:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'members.remove': { action: 'members.remove', operationId: 'members_remove', method: 'DELETE', path: '/organizations/{organization_id}/members/{user_id}', pathParams: ['organization_id', 'user_id'], scope: 'members:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'members.roles.grant': { action: 'members.roles.grant', operationId: 'members_roles_grant', method: 'PUT', path: '/organizations/{organization_id}/members/{user_id}/roles/{role_id}', pathParams: ['organization_id', 'user_id', 'role_id'], scope: 'roles:write', danger: 'write', approval: true, body: false, pagination: null },
@@ -4902,6 +5119,7 @@ export const environmentOperations = {
   'radar.settings.get': { action: 'radar.settings.get', operationId: 'radar_settings_get', method: 'GET', path: '/radar/settings', pathParams: [], scope: 'radar:read', danger: 'read', approval: true, body: false, pagination: null },
   'radar.settings.update': { action: 'radar.settings.update', operationId: 'radar_settings_update', method: 'PATCH', path: '/radar/settings', pathParams: [], scope: 'radar:write', danger: 'write', approval: true, body: true, pagination: null },
   'roles.create': { action: 'roles.create', operationId: 'roles_create', method: 'POST', path: '/roles', pathParams: [], scope: 'role_definitions:write', danger: 'write', approval: true, body: true, pagination: null },
+  'roles.definition.activate': { action: 'roles.definition.activate', operationId: 'roles_definition_activate', method: 'POST', path: '/roles/{id}/definition/activate', pathParams: ['id'], scope: 'role_definitions:write', danger: 'destructive', approval: true, body: true, pagination: null },
   'roles.delete': { action: 'roles.delete', operationId: 'roles_delete', method: 'DELETE', path: '/roles/{id}', pathParams: ['id'], scope: 'role_definitions:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'roles.get': { action: 'roles.get', operationId: 'roles_get', method: 'GET', path: '/roles/{id}', pathParams: ['id'], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
   'roles.list': { action: 'roles.list', operationId: 'roles_list', method: 'GET', path: '/roles', pathParams: [], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
@@ -4913,6 +5131,8 @@ export const environmentOperations = {
   'saml_apps.get': { action: 'saml_apps.get', operationId: 'saml_apps_get', method: 'GET', path: '/saml-apps/{id}', pathParams: ['id'], scope: 'saml_apps:read', danger: 'read', approval: true, body: false, pagination: null },
   'saml_apps.list': { action: 'saml_apps.list', operationId: 'saml_apps_list', method: 'GET', path: '/saml-apps', pathParams: [], scope: 'saml_apps:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'saml_apps.update': { action: 'saml_apps.update', operationId: 'saml_apps_update', method: 'PATCH', path: '/saml-apps/{id}', pathParams: ['id'], scope: 'saml_apps:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'signals.source.erasures.list': { action: null, operationId: 'signals_source_erasures', method: 'GET', path: '/signals/source/erasures', pathParams: [], scope: null, danger: null, approval: false, body: false, pagination: 'cursor' },
+  'signals.source.list': { action: null, operationId: 'signals_source_list', method: 'GET', path: '/signals/source', pathParams: [], scope: null, danger: null, approval: false, body: false, pagination: 'cursor' },
   'signin.policy.get': { action: 'signin.policy.get', operationId: 'signin_policy_get', method: 'GET', path: '/sign-in/policy', pathParams: [], scope: 'signin:read', danger: 'read', approval: true, body: false, pagination: null },
   'signin.policy.inherit': { action: 'signin.policy.inherit', operationId: 'signin_policy_inherit', method: 'DELETE', path: '/sign-in/policy/organizations/{organization_id}', pathParams: ['organization_id'], scope: 'signin:write', danger: 'critical', approval: true, body: false, pagination: null },
   'signin.policy.update': { action: 'signin.policy.update', operationId: 'signin_policy_update', method: 'PATCH', path: '/sign-in/policy', pathParams: [], scope: 'signin:write', danger: 'critical', approval: true, body: true, pagination: null },
@@ -4958,6 +5178,8 @@ export const environmentOperations = {
   'token_vault.secrets.list': { action: 'token_vault.secrets.list', operationId: 'token_vault_secrets_list', method: 'GET', path: '/token-vault/secrets', pathParams: [], scope: 'token_vault:read', danger: 'read', approval: true, body: false, pagination: 'cursor' },
   'token_vault.secrets.revoke': { action: 'token_vault.secrets.revoke', operationId: 'token_vault_secrets_revoke', method: 'POST', path: '/token-vault/secrets/{id}/revoke', pathParams: ['id'], scope: 'token_vault:write', danger: 'destructive', approval: true, body: true, pagination: null },
   'token_vault.secrets.rotate': { action: 'token_vault.secrets.rotate', operationId: 'token_vault_secrets_rotate', method: 'POST', path: '/token-vault/secrets/{id}/rotate', pathParams: ['id'], scope: 'token_vault:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'user_property_namespaces.configure': { action: 'user_property_namespaces.configure', operationId: 'user_property_namespaces_configure', method: 'PUT', path: '/user-property-namespaces/{name}', pathParams: ['name'], scope: 'user_property_namespaces:write', danger: 'critical', approval: true, body: true, pagination: null },
+  'user_property_namespaces.show': { action: 'user_property_namespaces.show', operationId: 'user_property_namespaces_show', method: 'GET', path: '/user-property-namespaces/{name}', pathParams: ['name'], scope: 'user_property_namespaces:read', danger: 'read', approval: true, body: false, pagination: null },
   'users.create': { action: 'users.create', operationId: 'users_create', method: 'POST', path: '/users', pathParams: [], scope: 'users:write', danger: 'write', approval: true, body: true, pagination: null },
   'users.deactivate': { action: 'users.deactivate', operationId: 'users_deactivate', method: 'DELETE', path: '/users/{id}', pathParams: ['id'], scope: 'users:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'users.environment_roles.get': { action: 'users.environment_roles.get', operationId: 'users_environment_roles_get', method: 'GET', path: '/users/{id}/environment-roles/{role_id}', pathParams: ['id', 'role_id'], scope: 'roles:read', danger: 'read', approval: true, body: false, pagination: null },
@@ -5253,6 +5475,57 @@ export class EnvironmentClient {
     },
   };
 
+  readonly appCatalog = {
+    /**
+     * Remove a catalog app without deleting its OAuth clients or user data.
+     *
+     * Requires scope `app_catalog:write`. Danger: destructive.
+     *
+     * `DELETE /app-catalog/{key}` · action `app_catalog.delete`
+     * @scope `app_catalog:write`
+     * @danger destructive
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    delete: <O extends CallOptions = CallOptions>(key: string, body: AppCatalogDeleteBody, options?: O): Promise<Outcome<AppCatalogDeleteResponse, O>> =>
+      this.transport.call<AppCatalogDeleteResponse, O>(environmentOperations['app_catalog.delete'], [key], body, options),
+    /**
+     * List catalog apps, including drafts and visibility settings.
+     *
+     * Requires scope `app_catalog:read`. Danger: read.
+     *
+     * `GET /app-catalog` · action `app_catalog.list`
+     * @scope `app_catalog:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    list: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<AppCatalogListResponse, O>> =>
+      this.transport.call<AppCatalogListResponse, O>(environmentOperations['app_catalog.list'], [], undefined, options),
+    /**
+     * Create or replace a catalog app, its icon and visibility. Version zero creates; a stale version conflicts.
+     *
+     * Requires scope `app_catalog:write`. Danger: write.
+     *
+     * `PUT /app-catalog/{key}` · action `app_catalog.save`
+     * @scope `app_catalog:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    save: <O extends CallOptions = CallOptions>(key: string, body: AppCatalogSaveBody, options?: O): Promise<Outcome<AppCatalogSaveResponse, O>> =>
+      this.transport.call<AppCatalogSaveResponse, O>(environmentOperations['app_catalog.save'], [key], body, options),
+    /**
+     * Read a catalog app and its publication settings.
+     *
+     * Requires scope `app_catalog:read`. Danger: read.
+     *
+     * `GET /app-catalog/{key}` · action `app_catalog.show`
+     * @scope `app_catalog:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    show: <O extends CallOptions = CallOptions>(key: string, options?: O): Promise<Outcome<AppCatalogShowResponse, O>> =>
+      this.transport.call<AppCatalogShowResponse, O>(environmentOperations['app_catalog.show'], [key], undefined, options),
+  };
+
   readonly approvals = {
     /**
      * Deny a pending approval request (CIBA) for the person it was raised for: the agent gets access_denied and no token.
@@ -5497,6 +5770,18 @@ export class EnvironmentClient {
       backchannelLogout: <O extends CallOptions = CallOptions>(id: string, body?: AppsSettingsBackchannelLogoutBody, options?: O): Promise<Outcome<AppsSettingsBackchannelLogoutResponse, O>> =>
         this.transport.call<AppsSettingsBackchannelLogoutResponse, O>(environmentOperations['apps.settings.backchannel_logout'], [id], body, options),
       /**
+       * Turn client-credentials authentication on or off for a confidential app; other grants and scopes stay unchanged.
+       *
+       * Requires scope `apps:write`. Danger: write.
+       *
+       * `PUT /apps/{id}/settings/client-credentials` · action `apps.settings.client_credentials`
+       * @scope `apps:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      clientCredentials: <O extends CallOptions = CallOptions>(id: string, body: AppsSettingsClientCredentialsBody, options?: O): Promise<Outcome<AppsSettingsClientCredentialsResponse, O>> =>
+        this.transport.call<AppsSettingsClientCredentialsResponse, O>(environmentOperations['apps.settings.client_credentials'], [id], body, options),
+      /**
        * Turn token exchange (RFC 8693) on or off for a confidential app.
        *
        * Requires scope `apps:write`. Danger: write.
@@ -5700,6 +5985,20 @@ export class EnvironmentClient {
     /** Every item of `audit.list`, fetching pages as the iteration reaches them. */
     listAll: (query?: Omit<AuditListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<AuditEntry, void, undefined> =>
       this.transport.paginate(environmentOperations['audit.list'], [], query as Record<string, unknown> | undefined, options),
+  };
+
+  readonly authenticator = {
+    me: {
+      /**
+       * Verified identity for the authenticator
+       *
+       * Requires the provisioned public authenticator client, devices.manage and a DPoP proof. Available before device registration; revoked keys are refused.
+       *
+       * `GET /authenticator/me`
+       */
+      list: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<AuthenticatorMeListResponse, O>> =>
+        this.transport.call<AuthenticatorMeListResponse, O>(environmentOperations['authenticator.me.list'], [], undefined, options),
+    },
   };
 
   readonly branding = {
@@ -6355,6 +6654,18 @@ export class EnvironmentClient {
 
   readonly invitations = {
     /**
+     * Get an invitation and its acceptance receipt, confined to its organization.
+     *
+     * Requires scope `invitations:read`. Danger: read.
+     *
+     * `GET /organizations/{organization_id}/invitations/{invitation_id}` · action `invitations.get`
+     * @scope `invitations:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    get: <O extends CallOptions = CallOptions>(organizationId: string, invitationId: string, options?: O): Promise<Outcome<InvitationsGetResponse, O>> =>
+      this.transport.call<InvitationsGetResponse, O>(environmentOperations['invitations.get'], [organizationId, invitationId], undefined, options),
+    /**
      * List an organization's pending invitations
      *
      * Requires scope `invitations:read`. Pending and unexpired only.
@@ -6683,6 +6994,22 @@ export class EnvironmentClient {
      */
     update: <O extends CallOptions = CallOptions>(organizationId: string, userId: string, body: MembersUpdateBody, options?: O): Promise<Outcome<MembersUpdateResponse, O>> =>
       this.transport.call<MembersUpdateResponse, O>(environmentOperations['members.update'], [organizationId, userId], body, options),
+    apps: {
+      roles: {
+        /**
+         * Replace one app's member roles atomically. Other apps and the organization membership remain unchanged. An empty role list removes this app's access only.
+         *
+         * Requires scope `roles:write`. Danger: write.
+         *
+         * `PUT /organizations/{organization_id}/members/{user_id}/apps/{client_id}/roles` · action `members.apps.roles.replace`
+         * @scope `roles:write`
+         * @danger write
+         * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+         */
+        replace: <O extends CallOptions = CallOptions>(organizationId: string, userId: string, clientId: string, body: MembersAppsRolesReplaceBody, options?: O): Promise<Outcome<MembersAppsRolesReplaceResponse, O>> =>
+          this.transport.call<MembersAppsRolesReplaceResponse, O>(environmentOperations['members.apps.roles.replace'], [organizationId, userId, clientId], body, options),
+      },
+    },
     roles: {
       /**
        * Grant a member a role in the organization
@@ -7456,6 +7783,20 @@ export class EnvironmentClient {
      */
     update: <O extends CallOptions = CallOptions>(id: string, body?: RolesUpdateBody, options?: O): Promise<Outcome<RolesUpdateResponse, O>> =>
       this.transport.call<RolesUpdateResponse, O>(environmentOperations['roles.update'], [id], body, options),
+    definition: {
+      /**
+       * Activate a reviewed application role definition for its existing holders.
+       *
+       * Requires scope `role_definitions:write`. Danger: destructive.
+       *
+       * `POST /roles/{id}/definition/activate` · action `roles.definition.activate`
+       * @scope `role_definitions:write`
+       * @danger destructive
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      activate: <O extends CallOptions = CallOptions>(id: string, body: RolesDefinitionActivateBody, options?: O): Promise<Outcome<RolesDefinitionActivateResponse, O>> =>
+        this.transport.call<RolesDefinitionActivateResponse, O>(environmentOperations['roles.definition.activate'], [id], body, options),
+    },
     permissions: {
       /**
        * Add a permission to a role: everyone holding the role gains it. The permission must be unscoped or declared by the role's own app.
@@ -7548,6 +7889,66 @@ export class EnvironmentClient {
      */
     update: <O extends CallOptions = CallOptions>(id: string, body?: SamlAppsUpdateBody, options?: O): Promise<Outcome<SamlAppsUpdateResponse, O>> =>
       this.transport.call<SamlAppsUpdateResponse, O>(environmentOperations['saml_apps.update'], [id], body, options),
+  };
+
+  readonly signals = {
+    source: {
+      /**
+       * Read the environment-owner identity source
+       *
+       * Requires an environment key with `signals_source:read` and explicit operator
+       * opt-in for this environment. Organization grants and delegated user tokens
+       * cannot read this source. Records include pre-organization authentication.
+       * The cursor follows committed sequence order and is bound to the source generation.
+       * Follow `next_cursor`, including on empty pages; a stale generation or purged
+       * cursor requires an explicit restart. Pages are at most 1000 records / 1 MiB.
+       * Data follows the Signals 2.0.0 identity event contracts. Scope is attached by
+       * the consumer's explicit grant; producer_environment is always host-bound.
+       * Replay is limited to seven days, including raw-IP retention. A heartbeat
+       * proves exporter maintenance, not complete coverage of every identity flow.
+       *
+       * `GET /signals/source`
+       */
+      list: <O extends CallOptions = CallOptions>(query?: SignalsSourceListQuery, options?: O): Promise<Outcome<SignalsSourceListResponse, O>> =>
+        this.transport.call<SignalsSourceListResponse, O>(environmentOperations['signals.source.list'], [], query, options),
+      /** Every item of `signals.source.list`, fetching pages as the iteration reaches them. */
+      listAll: (query?: Omit<SignalsSourceListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<{
+      contract_version: '2.0.0';
+      id: string;
+      producer_environment: string;
+      organization_id: string | null;
+      position: {
+        source_id: string;
+        partition: '0';
+        generation: string;
+        sequence: string;
+      };
+      kind: 'event' | 'relation';
+      name?: 'identity.authentication' | 'identity.session' | 'identity.token' | 'identity.account' | 'identity.activity';
+      occurred_at: string;
+      recorded_at: string;
+      data?: Record<string, unknown>;
+    }, void, undefined> =>
+        this.transport.paginate(environmentOperations['signals.source.list'], [], query as Record<string, unknown> | undefined, options),
+      erasures: {
+        /**
+         * Replay source deletion receipts
+         *
+         * Requires `signals_source:read` on an environment-owner key. Replay this stream
+         * before making a restored or newly backfilled consumer eligible. It retains only
+         * opaque subject references and deletion facts beyond the raw-event replay window.
+         * Publication order and cursor integrity match the event source. The credential
+         * is checked on every page. Ordinary tenant grants cannot access this stream.
+         *
+         * `GET /signals/source/erasures`
+         */
+        list: <O extends CallOptions = CallOptions>(query?: SignalsSourceErasuresListQuery, options?: O): Promise<Outcome<SignalsSourceErasuresListResponse, O>> =>
+          this.transport.call<SignalsSourceErasuresListResponse, O>(environmentOperations['signals.source.erasures.list'], [], query, options),
+        /** Every item of `signals.source.erasures.list`, fetching pages as the iteration reaches them. */
+        listAll: (query?: Omit<SignalsSourceErasuresListQuery, 'after'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<Record<string, unknown>, void, undefined> =>
+          this.transport.paginate(environmentOperations['signals.source.erasures.list'], [], query as Record<string, unknown> | undefined, options),
+      },
+    },
   };
 
   readonly signin = {
@@ -8162,6 +8563,33 @@ export class EnvironmentClient {
       rotate: <O extends CallOptions = CallOptions>(id: string, body: TokenVaultSecretsRotateBody, options?: O): Promise<Outcome<TokenVaultSecretsRotateResponse, O>> =>
         this.transport.call<TokenVaultSecretsRotateResponse, O>(environmentOperations['token_vault.secrets.rotate'], [id], body, options),
     },
+  };
+
+  readonly userPropertyNamespaces = {
+    /**
+     * Create or replace the app and webhook grants for a user-property namespace. Empty grants revoke access without deleting user data.
+     *
+     * Requires scope `user_property_namespaces:write`. Danger: critical.
+     *
+     * `PUT /user-property-namespaces/{name}` · action `user_property_namespaces.configure`
+     * @scope `user_property_namespaces:write`
+     * @danger critical
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    configure: <O extends CallOptions = CallOptions>(name: string, body?: UserPropertyNamespacesConfigureBody, options?: O): Promise<Outcome<UserPropertyNamespacesConfigureResponse, O>> =>
+      this.transport.call<UserPropertyNamespacesConfigureResponse, O>(environmentOperations['user_property_namespaces.configure'], [name], body, options),
+    /**
+     * Read the app and webhook grants for a user-property namespace.
+     *
+     * Requires scope `user_property_namespaces:read`. Danger: read.
+     *
+     * `GET /user-property-namespaces/{name}` · action `user_property_namespaces.show`
+     * @scope `user_property_namespaces:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    show: <O extends CallOptions = CallOptions>(name: string, options?: O): Promise<Outcome<UserPropertyNamespacesShowResponse, O>> =>
+      this.transport.call<UserPropertyNamespacesShowResponse, O>(environmentOperations['user_property_namespaces.show'], [name], undefined, options),
   };
 
   readonly users = {

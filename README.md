@@ -189,12 +189,14 @@ access token's payload on a resource server:
 ```ts
 import { organization, hasPermission, hasRole, isSupportSession } from '@cboxdk/id-js';
 
-if (!hasPermission(payload, 'invoices:create')) return forbidden();
+const showCreateHint = hasPermission(payload, 'invoices:create');
 if (organization(user)?.role === 'owner') showBilling();
 ```
 
 Matching is exact — `invoices:*` does not grant `invoices:delete`. An `org_role` this SDK
 version does not recognise reads as `null`, never as a tier it would have to guess.
+These are token snapshots for presentation. Protected operations require the fresh
+`checkPermissions` decision described below; hiding a control is not authorization.
 
 ### Feature flags
 
@@ -619,8 +621,27 @@ the hosted connect page, preselected to your app; they come back with
 
 Declare your app's authorization **roles** and **permissions** in code, then push them
 to Cbox ID on deploy. Your app owns what a role *means*; Cbox ID owns identity and who
-*holds* each role — assignments arrive back in the token's `roles` / `permissions`
-claims for you to enforce. Requires the app's client to hold the `apps.manifest` scope.
+*holds* each role. Publication requires the client's `apps.manifest` scope and a
+server acknowledgement matching the client, version and full catalog checksum.
+It does not assign roles. Expansions of existing roles await explicit activation.
+
+Token role and permission claims are snapshots for presentation. Authorize protected
+server requests and queued work using a fresh decision, then enforce your own row
+ownership/organization rules. Shared organization Admin is not app Admin.
+
+```ts
+import { checkPermissions } from '@cboxdk/id-js/server';
+
+const decision = await checkPermissions(
+  { issuer, clientId }, accessToken, authenticatedSubject, selectedOrganization,
+  ['invoices:create'],
+);
+if (!decision.allowed()) throw new Error('Forbidden');
+```
+
+Derive the subject from verified authentication and authorize the selected organization;
+do not accept either as an unchecked form value. The check has no positive cache,
+refuses redirects and rejects mismatched, incomplete or unavailable decisions.
 
 ```ts
 import { defineAuthz, publishManifest } from '@cboxdk/id-js';

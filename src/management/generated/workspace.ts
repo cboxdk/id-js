@@ -15,8 +15,6 @@ export interface Organization {
   id?: string;
   name?: string;
   status?: 'active' | 'suspended';
-  /** The workspace's projects with each one's plan/allowance. Present only for billing-readers (plans are per project). */
-  projects?: Project[];
 }
 
 export interface Project {
@@ -24,8 +22,9 @@ export interface Project {
   name?: string;
   slug?: string;
   status?: 'active' | 'suspended';
-  /** This project's plan environment allowance. */
+  /** Local per-project ceiling; creating environments also requires sufficient current Billing entitlement. */
   environment_limit?: number;
+  /** Number of environments visible to the caller. */
   environments_used?: number;
 }
 
@@ -44,11 +43,16 @@ export interface Environment {
 
 export interface Member {
   id?: string;
-  email?: string;
+  email?: string | null;
   name?: string | null;
+  /** Shared membership tier; only current owner implies app authority. */
   role?: 'owner' | 'admin' | 'developer' | 'member' | 'viewer';
-  status?: 'active' | 'invited';
+  roles?: Array<'admin' | 'developer' | 'billing' | 'viewer'>;
+  roles_version?: string;
+  status?: 'active' | 'invited' | 'suspended';
   all_environments?: boolean;
+  environment_ids?: string[];
+  environment_access_version?: string;
 }
 
 /** An environment, and — when the request asked for one — its first management key. */
@@ -75,7 +79,7 @@ export interface WorkspaceKey {
   prefix?: string;
   role: 'owner' | 'admin' | 'developer' | 'member' | 'viewer';
   /** Null when the role alone bounds the key. */
-  scopes?: Array<'workspace:read' | 'projects:write' | 'environments:write' | 'team:read' | 'team:write' | 'keys:write' | 'settings:write'> | null;
+  scopes?: Array<'workspace:read' | 'projects:write' | 'environments:write' | 'team:read' | 'team:write' | 'keys:write' | 'settings:write' | 'billing:write'> | null;
   /** The key that minted it, if a key did. Revoking the parent revokes it. */
   parent_key_id?: string | null;
   /** `organization_member` or `workspace_key`; null for a key minted before this was recorded. */
@@ -90,11 +94,20 @@ export interface WorkspaceKey {
 export interface TeamInvitation {
   id: string;
   email: string;
-  role: 'admin' | 'developer' | 'member' | 'viewer';
+  role?: 'admin' | 'developer' | 'member' | 'viewer';
+  roles: Array<'admin' | 'developer' | 'billing' | 'viewer'>;
+  app_role_label?: string | null;
   /** The person, or the API key, that sent it — by name. */
   invited_by?: string | null;
   invited_at?: string | null;
   expires_at: string;
+}
+
+export interface TeamInvitationReceipt {
+  id: string;
+  email: string;
+  roles: Array<'admin' | 'developer' | 'billing' | 'viewer'>;
+  status: 'invited';
 }
 
 export interface CustomDomain {
@@ -145,6 +158,27 @@ export type ActionApprovalsGetResponse = {
     status: 'pending' | 'approved' | 'denied' | 'expired' | 'consumed';
   };
 };
+
+/** Request body of `billing.account.update`. */
+export interface BillingAccountUpdateBody {
+  billing_email: string;
+  invoice_name: string;
+  address_line1: string;
+  address_line2?: string | null;
+  postal_code: string;
+  city: string;
+  country: 'AD' | 'AE' | 'AF' | 'AG' | 'AI' | 'AL' | 'AM' | 'AO' | 'AQ' | 'AR' | 'AS' | 'AT' | 'AU' | 'AW' | 'AX' | 'AZ' | 'BA' | 'BB' | 'BD' | 'BE' | 'BF' | 'BG' | 'BH' | 'BI' | 'BJ' | 'BL' | 'BM' | 'BN' | 'BO' | 'BQ' | 'BR' | 'BS' | 'BT' | 'BV' | 'BW' | 'BY' | 'BZ' | 'CA' | 'CC' | 'CD' | 'CF' | 'CG' | 'CH' | 'CI' | 'CK' | 'CL' | 'CM' | 'CN' | 'CO' | 'CR' | 'CU' | 'CV' | 'CW' | 'CX' | 'CY' | 'CZ' | 'DE' | 'DJ' | 'DK' | 'DM' | 'DO' | 'DZ' | 'EC' | 'EE' | 'EG' | 'EH' | 'ER' | 'ES' | 'ET' | 'FI' | 'FJ' | 'FK' | 'FM' | 'FO' | 'FR' | 'GA' | 'GB' | 'GD' | 'GE' | 'GF' | 'GG' | 'GH' | 'GI' | 'GL' | 'GM' | 'GN' | 'GP' | 'GQ' | 'GR' | 'GS' | 'GT' | 'GU' | 'GW' | 'GY' | 'HK' | 'HM' | 'HN' | 'HR' | 'HT' | 'HU' | 'ID' | 'IE' | 'IL' | 'IM' | 'IN' | 'IO' | 'IQ' | 'IR' | 'IS' | 'IT' | 'JE' | 'JM' | 'JO' | 'JP' | 'KE' | 'KG' | 'KH' | 'KI' | 'KM' | 'KN' | 'KP' | 'KR' | 'KW' | 'KY' | 'KZ' | 'LA' | 'LB' | 'LC' | 'LI' | 'LK' | 'LR' | 'LS' | 'LT' | 'LU' | 'LV' | 'LY' | 'MA' | 'MC' | 'MD' | 'ME' | 'MF' | 'MG' | 'MH' | 'MK' | 'ML' | 'MM' | 'MN' | 'MO' | 'MP' | 'MQ' | 'MR' | 'MS' | 'MT' | 'MU' | 'MV' | 'MW' | 'MX' | 'MY' | 'MZ' | 'NA' | 'NC' | 'NE' | 'NF' | 'NG' | 'NI' | 'NL' | 'NO' | 'NP' | 'NR' | 'NU' | 'NZ' | 'OM' | 'PA' | 'PE' | 'PF' | 'PG' | 'PH' | 'PK' | 'PL' | 'PM' | 'PN' | 'PR' | 'PS' | 'PT' | 'PW' | 'PY' | 'QA' | 'RE' | 'RO' | 'RS' | 'RU' | 'RW' | 'SA' | 'SB' | 'SC' | 'SD' | 'SE' | 'SG' | 'SH' | 'SI' | 'SJ' | 'SK' | 'SL' | 'SM' | 'SN' | 'SO' | 'SR' | 'SS' | 'ST' | 'SV' | 'SX' | 'SY' | 'SZ' | 'TC' | 'TD' | 'TF' | 'TG' | 'TH' | 'TJ' | 'TK' | 'TL' | 'TM' | 'TN' | 'TO' | 'TR' | 'TT' | 'TV' | 'TW' | 'TZ' | 'UA' | 'UG' | 'UM' | 'US' | 'UY' | 'UZ' | 'VA' | 'VC' | 'VE' | 'VG' | 'VI' | 'VN' | 'VU' | 'WF' | 'WS' | 'YE' | 'YT' | 'ZA' | 'ZM' | 'ZW';
+  tax_id?: string | null;
+}
+
+/** Response body of `billing.account.update`. */
+export type BillingAccountUpdateResponse = void;
+
+/** Response body of `billing.payment_method.default`. */
+export type BillingPaymentMethodDefaultResponse = void;
+
+/** Response body of `billing.payment_method.remove`. */
+export type BillingPaymentMethodRemoveResponse = void;
 
 /** Request body of `environments.create`. */
 export interface EnvironmentsCreateBody {
@@ -219,7 +253,7 @@ export interface KeysWorkspaceCreateBody {
   name: string;
   role: 'admin' | 'developer' | 'member' | 'viewer';
   /** Narrow the key below its role. Left out, the role alone bounds it — or, minted by a key with scopes, that key's scopes. */
-  scopes?: Array<'workspace:read' | 'projects:write' | 'environments:write' | 'team:read' | 'team:write' | 'keys:write' | 'settings:write'> | null;
+  scopes?: Array<'workspace:read' | 'projects:write' | 'environments:write' | 'team:read' | 'team:write' | 'keys:write' | 'billing:write' | 'settings:write'> | null;
   /** When it stops working. Left out, it does not expire — or, minted by a key that does, expires with it. */
   expires_at?: string | null;
 }
@@ -249,7 +283,7 @@ export type KeysWorkspaceRevokeResponse = void;
 /** Request body of `projects.create`. */
 export interface ProjectsCreateBody {
   name: string;
-  /** This project's plan environment allowance (default 2). */
+  /** Optional lower per-project environment allowance. Defaults to the account's current Billing entitlement and cannot exceed it. */
   environment_limit?: number;
 }
 
@@ -290,6 +324,7 @@ export type ProjectsVerificationResendResponse = {
 
 /** Request body of `team.environment_access`. */
 export interface TeamEnvironmentAccessBody {
+  environment_access_version: string;
   /** True: every environment, including ones created later. */
   all_environments: boolean;
   /** With `all_environments` false: the environments they reach. */
@@ -308,7 +343,7 @@ export type TeamInvitationsListResponse = {
 
 /** Response body of `team.invitations.resend`. */
 export type TeamInvitationsResendResponse = {
-  data?: Member;
+  data?: TeamInvitationReceipt;
 };
 
 /** Response body of `team.invitations.revoke`. */
@@ -318,12 +353,12 @@ export type TeamInvitationsRevokeResponse = void;
 export interface TeamInviteBody {
   email: string;
   name?: string | null;
-  role: 'admin' | 'developer' | 'member' | 'viewer';
+  roles: Array<'admin' | 'developer' | 'billing' | 'viewer'>;
 }
 
 /** Response body of `team.invite`. */
 export type TeamInviteResponse = {
-  data?: Member;
+  data?: TeamInvitationReceipt;
 };
 
 /** Query parameters of `team.list`. */
@@ -338,12 +373,18 @@ export type TeamListResponse = {
   meta?: PageMeta;
 };
 
+/** Request body of `team.remove`. */
+export interface TeamRemoveBody {
+  roles_version: string;
+}
+
 /** Response body of `team.remove`. */
 export type TeamRemoveResponse = void;
 
 /** Request body of `team.role`. */
 export interface TeamRoleBody {
-  role: 'admin' | 'developer' | 'member' | 'viewer';
+  roles: Array<'viewer' | 'developer' | 'billing' | 'admin'>;
+  roles_version: string;
 }
 
 /** Response body of `team.role`. */
@@ -374,6 +415,9 @@ export type WorkspaceSettingsUpdateResponse = {
 /** Every operation of the Cbox ID — Workspace Management API — method, path, scope and danger — keyed by action name. */
 export const workspaceOperations = {
   'action_approvals.get': { action: null, operationId: null, method: 'GET', path: '/workspace/action-approvals/{id}', pathParams: ['id'], scope: null, danger: null, approval: false, body: false, pagination: null },
+  'billing.account.update': { action: 'billing.account.update', operationId: 'billing_account_update', method: 'PATCH', path: '/workspace/billing/account', pathParams: [], scope: 'billing:write', danger: 'write', approval: true, body: true, pagination: null },
+  'billing.payment_method.default': { action: 'billing.payment_method.default', operationId: 'billing_payment_method_default', method: 'PATCH', path: '/workspace/billing/payment-methods/{id}/default', pathParams: ['id'], scope: 'billing:write', danger: 'write', approval: true, body: false, pagination: null },
+  'billing.payment_method.remove': { action: 'billing.payment_method.remove', operationId: 'billing_payment_method_remove', method: 'DELETE', path: '/workspace/billing/payment-methods/{id}', pathParams: ['id'], scope: 'billing:write', danger: 'write', approval: true, body: false, pagination: null },
   'environments.create': { action: 'environments.create', operationId: 'environments_create', method: 'POST', path: '/workspace/environments', pathParams: [], scope: 'environments:write', danger: 'critical', approval: true, body: true, pagination: null },
   'environments.domain.remove': { action: 'environments.domain.remove', operationId: 'environments_domain_remove', method: 'DELETE', path: '/workspace/environments/{environment_id}/domain', pathParams: ['environment_id'], scope: 'environments:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'environments.domain.request': { action: 'environments.domain.request', operationId: 'environments_domain_request', method: 'POST', path: '/workspace/environments/{environment_id}/domain', pathParams: ['environment_id'], scope: 'environments:write', danger: 'write', approval: true, body: true, pagination: null },
@@ -396,7 +440,7 @@ export const workspaceOperations = {
   'team.invitations.revoke': { action: 'team.invitations.revoke', operationId: 'team_invitations_revoke', method: 'DELETE', path: '/workspace/invitations/{id}', pathParams: ['id'], scope: 'team:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'team.invite': { action: 'team.invite', operationId: 'team_invite', method: 'POST', path: '/workspace/members', pathParams: [], scope: 'team:write', danger: 'write', approval: true, body: true, pagination: null },
   'team.list': { action: 'team.list', operationId: 'team_list', method: 'GET', path: '/workspace/members', pathParams: [], scope: 'team:read', danger: 'read', approval: true, body: false, pagination: 'page' },
-  'team.remove': { action: 'team.remove', operationId: 'team_remove', method: 'DELETE', path: '/workspace/members/{id}', pathParams: ['id'], scope: 'team:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'team.remove': { action: 'team.remove', operationId: 'team_remove', method: 'DELETE', path: '/workspace/members/{id}', pathParams: ['id'], scope: 'team:write', danger: 'destructive', approval: true, body: true, pagination: null },
   'team.role': { action: 'team.role', operationId: 'team_role', method: 'PATCH', path: '/workspace/members/{id}/role', pathParams: ['id'], scope: 'team:write', danger: 'write', approval: true, body: true, pagination: null },
   'team.transfer_ownership': { action: 'team.transfer_ownership', operationId: 'team_transfer_ownership', method: 'POST', path: '/workspace/members/{id}/transfer-ownership', pathParams: ['id'], scope: 'team:write', danger: 'critical', approval: true, body: false, pagination: null },
   'workspace.get': { action: 'workspace.get', operationId: 'workspace_get', method: 'GET', path: '/workspace', pathParams: [], scope: 'workspace:read', danger: 'read', approval: true, body: false, pagination: null },
@@ -446,12 +490,55 @@ export class WorkspaceClient {
       this.transport.call<ActionApprovalsGetResponse, O>(workspaceOperations['action_approvals.get'], [id], undefined, options),
   };
 
+  readonly billing = {
+    account: {
+      /**
+       * Update the workspace billing contact and invoice address.
+       *
+       * Requires scope `billing:write` and a role that may `manage-billing`. Danger: write.
+       *
+       * `PATCH /workspace/billing/account` · action `billing.account.update`
+       * @scope `billing:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      update: <O extends CallOptions = CallOptions>(body: BillingAccountUpdateBody, options?: O): Promise<Outcome<BillingAccountUpdateResponse, O>> =>
+        this.transport.call<BillingAccountUpdateResponse, O>(workspaceOperations['billing.account.update'], [], body, options),
+    },
+    paymentMethod: {
+      /**
+       * Choose the workspace default payment card.
+       *
+       * Requires scope `billing:write` and a role that may `manage-billing`. Danger: write.
+       *
+       * `PATCH /workspace/billing/payment-methods/{id}/default` · action `billing.payment_method.default`
+       * @scope `billing:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      default: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<BillingPaymentMethodDefaultResponse, O>> =>
+        this.transport.call<BillingPaymentMethodDefaultResponse, O>(workspaceOperations['billing.payment_method.default'], [id], undefined, options),
+      /**
+       * Remove an unneeded payment card from this workspace.
+       *
+       * Requires scope `billing:write` and a role that may `manage-billing`. Danger: write.
+       *
+       * `DELETE /workspace/billing/payment-methods/{id}` · action `billing.payment_method.remove`
+       * @scope `billing:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      remove: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<BillingPaymentMethodRemoveResponse, O>> =>
+        this.transport.call<BillingPaymentMethodRemoveResponse, O>(workspaceOperations['billing.payment_method.remove'], [id], undefined, options),
+    },
+  };
+
   readonly environments = {
     /**
      * Create an environment
      *
      * Requires scope `environments:write` and the `manage-environments` capability
-     * (owner/admin/developer). Danger: critical — with `initial_key` it mints a credential.
+     * (`id:write` for human members, or current ownership). Danger: critical — with `initial_key` it mints a credential.
      *
      * With `initial_key`, the environment's first management key is minted in the same
      * call and returned once as `initial_key.token` — enough for an agent holding one
@@ -468,7 +555,7 @@ export class WorkspaceClient {
     /**
      * List environments
      *
-     * Requires scope `workspace:read` (any role).
+     * Requires scope `workspace:read` and permission to read environments. Returns only currently permitted environments; Billing-only members cannot list them.
      *
      * `GET /workspace/environments` · action `environments.list`
      * @scope `workspace:read`
@@ -594,7 +681,7 @@ export class WorkspaceClient {
     /**
      * Create a project
      *
-     * Stand up another independently-billed IdP product. Requires scope `projects:write` and the `manage-environments` capability (owner/admin/developer).
+     * Stand up another independently-billed IdP product. Requires scope `projects:write` and the `manage-environments` capability (`id:write` for human members, or current ownership).
      *
      * `POST /workspace/projects` · action `projects.create`
      * @scope `projects:write`
@@ -606,7 +693,7 @@ export class WorkspaceClient {
     /**
      * List projects
      *
-     * Requires scope `workspace:read` (any role). The workspace's projects (IdP products). Each carries its own plan and environment allowance.
+     * Requires scope `workspace:read` and permission to read environments. Human callers see only projects containing environments they may access; environment counts include only those environments. Billing-only members cannot list projects.
      *
      * `GET /workspace/projects` · action `projects.list`
      * @scope `workspace:read`
@@ -683,11 +770,10 @@ export class WorkspaceClient {
     /**
      * Invite a member
      *
-     * Requires scope `team:write` and the `manage-members` capability (owner/admin). Invites the address onto the
-     * workspace's team — the same invitation the console's Team page sends: a mail naming
-     * this key as the inviter and the role, with a signed link on which the invitee sets a
-     * password and is signed in. Owner is never invited; ownership is transferred. An
-     * earlier pending invitation for the same address is superseded. List, re-send and
+     * Requires scope `team:write` and the `manage-members` capability (`members:manage` for human members, or current ownership). Invites the address onto the
+     * ID product team with the selected app roles. Existing shared membership and other
+     * apps are preserved. Owner is never invited; ownership is transferred separately. An
+     * earlier pending invitation for the same address and this app is superseded. List, re-send and
      * withdraw it under `/workspace/invitations`.
      *
      * `POST /workspace/members` · action `team.invite`
@@ -700,7 +786,7 @@ export class WorkspaceClient {
     /**
      * List members
      *
-     * Requires scope `team:read` and the `read-members` capability (owner/admin/viewer). The roster is PII — a developer key is refused.
+     * Requires scope `team:read` and the `read-members` capability (`members:read` for human members, or current ownership). The roster contains personal information; a machine key also needs an explicit role allowing member reads.
      *
      * `GET /workspace/members` · action `team.list`
      * @scope `team:read`
@@ -713,7 +799,7 @@ export class WorkspaceClient {
     listAll: (query?: Omit<TeamListQuery, 'page'>, options?: Omit<CallOptions, 'approval'>): AsyncGenerator<Member, void, undefined> =>
       this.transport.paginate(workspaceOperations['team.list'], [], query as Record<string, unknown> | undefined, options),
     /**
-     * Remove a member from the workspace's team. The owner is never removed; transfer ownership first.
+     * Remove native ID app roles while preserving shared organization membership and other apps. The current owner cannot be removed.
      *
      * Requires scope `team:write` and a role that may `manage-members`. Danger: destructive.
      *
@@ -722,10 +808,10 @@ export class WorkspaceClient {
      * @danger destructive
      * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
      */
-    remove: <O extends CallOptions = CallOptions>(id: string, options?: O): Promise<Outcome<TeamRemoveResponse, O>> =>
-      this.transport.call<TeamRemoveResponse, O>(workspaceOperations['team.remove'], [id], undefined, options),
+    remove: <O extends CallOptions = CallOptions>(id: string, body: TeamRemoveBody, options?: O): Promise<Outcome<TeamRemoveResponse, O>> =>
+      this.transport.call<TeamRemoveResponse, O>(workspaceOperations['team.remove'], [id], body, options),
     /**
-     * Change a team member's role (admin, developer, member or viewer). The owner's role changes only by transferring ownership.
+     * Replace native ID app roles atomically. Shared organization membership is preserved.
      *
      * Requires scope `team:write` and a role that may `manage-members`. Danger: write.
      *
@@ -737,7 +823,7 @@ export class WorkspaceClient {
     role: <O extends CallOptions = CallOptions>(id: string, body: TeamRoleBody, options?: O): Promise<Outcome<TeamRoleResponse, O>> =>
       this.transport.call<TeamRoleResponse, O>(workspaceOperations['team.role'], [id], body, options),
     /**
-     * Make another member the workspace's owner; the current owner stays on as an admin. Only the owner, signed in, may do this.
+     * Transfer shared organization ownership. Existing app roles are preserved; the previous owner may lose native ID access. Only the current owner, signed in, may do this.
      *
      * Requires scope `team:write` and a role that may `manage-members`. Danger: critical.
      *
@@ -794,7 +880,7 @@ export class WorkspaceClient {
     /**
      * Get the workspace
      *
-     * Requires scope `workspace:read` (any role). Returns the workspace's identity. The `projects` block (each project's plan/allowance) is included only for keys whose role can read billing (owner/admin/viewer — not developer).
+     * Requires scope `workspace:read` and current workspace access. Returns only the workspace identity and status, including for members with only the Billing app role.
      *
      * `GET /workspace` · action `workspace.get`
      * @scope `workspace:read`
@@ -807,7 +893,7 @@ export class WorkspaceClient {
       /**
        * Rename the workspace.
        *
-       * Requires scope `settings:write` and a role that may `manage-members`. Danger: write.
+       * Requires scope `settings:write` and a role that may `own-organization` and `manage-members`. Danger: write.
        *
        * `PATCH /workspace` · action `workspace.settings.update`
        * @scope `settings:write`

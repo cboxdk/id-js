@@ -12,6 +12,15 @@ export interface Profile {
   email: string | null;
 }
 
+export interface Passkey {
+  id: string;
+  /** What you call it — one to 64 characters. */
+  name: string;
+  created_at?: string | null;
+  /** When it last signed you in; null if it never has since this was recorded. */
+  last_used_at?: string | null;
+}
+
 export interface SessionsRevoked {
   /** How many sessions were signed out. */
   revoked: number;
@@ -75,8 +84,35 @@ export type ApiKeysRevokeResponse = void;
 /** Response body of `applications.revoke`. */
 export type ApplicationsRevokeResponse = void;
 
+/** Query parameters of `apps.list`. */
+export interface AppsListQuery {
+  organization_id?: string | null;
+}
+
+/** Response body of `apps.list`. */
+export type AppsListResponse = {
+  data: Array<{
+    key: string;
+    name: string;
+    description: string | null;
+    launch_url: string;
+    icon_url: string | null;
+    position: number;
+    version: number;
+  }>;
+  meta: {
+    revision: string;
+    refresh_after: number;
+  };
+};
+
 /** Response body of `devices.remove`. */
 export type DevicesRemoveResponse = void;
+
+/** Response body of `email.confirmation.send`. */
+export type EmailConfirmationSendResponse = {
+  data: Record<string, unknown>;
+};
 
 /** Response body of `mfa.sms.remove`. */
 export type MfaSmsRemoveResponse = void;
@@ -86,6 +122,17 @@ export type OrganizationsLeaveResponse = void;
 
 /** Response body of `passkeys.remove`. */
 export type PasskeysRemoveResponse = void;
+
+/** Request body of `passkeys.rename`. */
+export interface PasskeysRenameBody {
+  /** What to call the passkey: one to 64 characters, no line breaks. */
+  name: string;
+}
+
+/** Response body of `passkeys.rename`. */
+export type PasskeysRenameResponse = {
+  data: Passkey;
+};
 
 /** Response body of `pipes.disconnect`. */
 export type PipesDisconnectResponse = void;
@@ -109,8 +156,52 @@ export type SessionsRevokeOthersResponse = {
   data: SessionsRevoked;
 };
 
+/** Response body of `sign_in_methods.disconnect`. */
+export type SignInMethodsDisconnectResponse = void;
+
 /** Response body of `social.unlink`. */
 export type SocialUnlinkResponse = void;
+
+/** Response body of `totp.remove`. */
+export type TotpRemoveResponse = void;
+
+/** Request body of `totp.rename`. */
+export interface TotpRenameBody {
+  name: string;
+}
+
+/** Response body of `totp.rename`. */
+export type TotpRenameResponse = void;
+
+/** Request body of `waitlists.join`. */
+export interface WaitlistsJoinBody {
+  /** An active team you belong to; required for feature waitlists. */
+  organization?: string | null;
+  /** Feature updates or participation in a test group. */
+  interest?: 'notify' | 'test' | null;
+  /** Optional two-letter country code. */
+  country?: string | null;
+  /** Answers by the programme’s question keys, at most 2000 characters each. */
+  answers?: Record<string, unknown>;
+  /** A stable UUID for this signup attempt, also used for Billing idempotency. */
+  reference: string;
+}
+
+/** Response body of `waitlists.join`. */
+export type WaitlistsJoinResponse = {
+  data: Record<string, unknown>;
+};
+
+/** Request body of `waitlists.leave`. */
+export interface WaitlistsLeaveBody {
+  organization: string;
+  reference: string;
+}
+
+/** Response body of `waitlists.leave`. */
+export type WaitlistsLeaveResponse = {
+  data: Record<string, unknown>;
+};
 
 // ── Operations ─────────────────────────────────────────────────────────────────────────────
 
@@ -120,15 +211,23 @@ export const accountOperations = {
   'account.api_keys.create': { action: 'account.api_keys.create', operationId: 'account_api_keys_create', method: 'POST', path: '/me/organizations/{organization_id}/api-keys', pathParams: ['organization_id'], scope: 'account:api_keys:write', danger: 'critical', approval: true, body: true, pagination: null },
   'account.api_keys.revoke': { action: 'account.api_keys.revoke', operationId: 'account_api_keys_revoke', method: 'DELETE', path: '/me/organizations/{organization_id}/api-keys/{key_id}', pathParams: ['organization_id', 'key_id'], scope: 'account:api_keys:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.applications.revoke': { action: 'account.applications.revoke', operationId: 'account_applications_revoke', method: 'DELETE', path: '/me/applications/{client_id}', pathParams: ['client_id'], scope: 'account:applications:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'account.apps.list': { action: 'account.apps.list', operationId: 'account_apps_list', method: 'GET', path: '/me/apps', pathParams: [], scope: 'account:apps:read', danger: 'read', approval: true, body: false, pagination: null },
   'account.devices.remove': { action: 'account.devices.remove', operationId: 'account_devices_remove', method: 'DELETE', path: '/me/devices/{device_id}', pathParams: ['device_id'], scope: 'account:devices:write', danger: 'destructive', approval: true, body: false, pagination: null },
+  'account.email.confirmation.send': { action: 'account.email.confirmation.send', operationId: 'account_email_confirmation_send', method: 'POST', path: '/me/email/confirmation', pathParams: [], scope: 'account:profile:write', danger: 'write', approval: true, body: false, pagination: null },
   'account.mfa.sms.remove': { action: 'account.mfa.sms.remove', operationId: 'account_mfa_sms_remove', method: 'DELETE', path: '/me/mfa/sms', pathParams: [], scope: 'account:sign_in:write', danger: 'critical', approval: true, body: false, pagination: null },
   'account.organizations.leave': { action: 'account.organizations.leave', operationId: 'account_organizations_leave', method: 'POST', path: '/me/organizations/{organization_id}/leave', pathParams: ['organization_id'], scope: 'account:organizations:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.passkeys.remove': { action: 'account.passkeys.remove', operationId: 'account_passkeys_remove', method: 'DELETE', path: '/me/passkeys/{passkey_id}', pathParams: ['passkey_id'], scope: 'account:sign_in:write', danger: 'critical', approval: true, body: false, pagination: null },
+  'account.passkeys.rename': { action: 'account.passkeys.rename', operationId: 'account_passkeys_rename', method: 'PATCH', path: '/me/passkeys/{passkey_id}', pathParams: ['passkey_id'], scope: 'account:sign_in:write', danger: 'write', approval: true, body: true, pagination: null },
   'account.pipes.disconnect': { action: 'account.pipes.disconnect', operationId: 'account_pipes_disconnect', method: 'DELETE', path: '/me/pipes/{provider}', pathParams: ['provider'], scope: 'account:pipes:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.profile.update': { action: 'account.profile.update', operationId: 'account_profile_update', method: 'PATCH', path: '/me/profile', pathParams: [], scope: 'account:profile:write', danger: 'write', approval: true, body: true, pagination: null },
   'account.sessions.revoke': { action: 'account.sessions.revoke', operationId: 'account_sessions_revoke', method: 'DELETE', path: '/me/sessions/{session_id}', pathParams: ['session_id'], scope: 'account:sessions:write', danger: 'destructive', approval: true, body: false, pagination: null },
   'account.sessions.revoke_others': { action: 'account.sessions.revoke_others', operationId: 'account_sessions_revoke_others', method: 'POST', path: '/me/sessions/revoke-others', pathParams: [], scope: 'account:sessions:write', danger: 'critical', approval: true, body: false, pagination: null },
+  'account.sign_in_methods.disconnect': { action: 'account.sign_in_methods.disconnect', operationId: 'account_sign_in_methods_disconnect', method: 'DELETE', path: '/me/sign-in-methods/{identity_id}', pathParams: ['identity_id'], scope: 'account:sign_in:write', danger: 'critical', approval: true, body: false, pagination: null },
   'account.social.unlink': { action: 'account.social.unlink', operationId: 'account_social_unlink', method: 'DELETE', path: '/me/social/{provider}', pathParams: ['provider'], scope: 'account:sign_in:write', danger: 'critical', approval: true, body: false, pagination: null },
+  'account.totp.remove': { action: 'account.totp.remove', operationId: 'account_totp_remove', method: 'DELETE', path: '/me/two-factor/apps/{factor_id}', pathParams: ['factor_id'], scope: 'account:sign_in:write', danger: 'critical', approval: true, body: false, pagination: null },
+  'account.totp.rename': { action: 'account.totp.rename', operationId: 'account_totp_rename', method: 'PATCH', path: '/me/two-factor/apps/{factor_id}', pathParams: ['factor_id'], scope: 'account:sign_in:write', danger: 'write', approval: true, body: true, pagination: null },
+  'account.waitlists.join': { action: 'account.waitlists.join', operationId: 'account_waitlists_join', method: 'POST', path: '/me/services/{program}/waitlist', pathParams: ['program'], scope: 'account:waitlists:write', danger: 'write', approval: true, body: true, pagination: null },
+  'account.waitlists.leave': { action: 'account.waitlists.leave', operationId: 'account_waitlists_leave', method: 'POST', path: '/me/services/{program}/waitlist/leave', pathParams: ['program'], scope: 'account:waitlists:write', danger: 'write', approval: true, body: true, pagination: null },
 } as const satisfies Record<string, OperationSpec>;
 
 // ── Client ─────────────────────────────────────────────────────────────────────────────────
@@ -217,6 +316,21 @@ export class AccountClient {
       this.transport.call<ApplicationsRevokeResponse, O>(accountOperations['account.applications.revoke'], [clientId], undefined, options),
   };
 
+  readonly apps = {
+    /**
+     * List the published apps visible to you in this environment. Optional organization context must be one you actively belong to.
+     *
+     * Requires scope `account:apps:read` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: read.
+     *
+     * `GET /me/apps` · action `account.apps.list`
+     * @scope `account:apps:read`
+     * @danger read
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    list: <O extends CallOptions = CallOptions>(query?: AppsListQuery, options?: O): Promise<Outcome<AppsListResponse, O>> =>
+      this.transport.call<AppsListResponse, O>(accountOperations['account.apps.list'], [], query, options),
+  };
+
   readonly devices = {
     /**
      * Remove one of your trusted devices; it is no longer asked to approve anything.
@@ -230,6 +344,23 @@ export class AccountClient {
      */
     remove: <O extends CallOptions = CallOptions>(deviceId: string, options?: O): Promise<Outcome<DevicesRemoveResponse, O>> =>
       this.transport.call<DevicesRemoveResponse, O>(accountOperations['account.devices.remove'], [deviceId], undefined, options),
+  };
+
+  readonly email = {
+    confirmation: {
+      /**
+       * Mail yourself a link that confirms your email address.
+       *
+       * Requires scope `account:profile:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: write.
+       *
+       * `POST /me/email/confirmation` · action `account.email.confirmation.send`
+       * @scope `account:profile:write`
+       * @danger write
+       * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+       */
+      send: <O extends CallOptions = CallOptions>(options?: O): Promise<Outcome<EmailConfirmationSendResponse, O>> =>
+        this.transport.call<EmailConfirmationSendResponse, O>(accountOperations['account.email.confirmation.send'], [], undefined, options),
+    },
   };
 
   readonly mfa = {
@@ -277,6 +408,18 @@ export class AccountClient {
      */
     remove: <O extends CallOptions = CallOptions>(passkeyId: string, options?: O): Promise<Outcome<PasskeysRemoveResponse, O>> =>
       this.transport.call<PasskeysRemoveResponse, O>(accountOperations['account.passkeys.remove'], [passkeyId], undefined, options),
+    /**
+     * Rename one of your passkeys.
+     *
+     * Requires scope `account:sign_in:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: write.
+     *
+     * `PATCH /me/passkeys/{passkey_id}` · action `account.passkeys.rename`
+     * @scope `account:sign_in:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    rename: <O extends CallOptions = CallOptions>(passkeyId: string, body: PasskeysRenameBody, options?: O): Promise<Outcome<PasskeysRenameResponse, O>> =>
+      this.transport.call<PasskeysRenameResponse, O>(accountOperations['account.passkeys.rename'], [passkeyId], body, options),
   };
 
   readonly pipes = {
@@ -336,6 +479,21 @@ export class AccountClient {
       this.transport.call<SessionsRevokeOthersResponse, O>(accountOperations['account.sessions.revoke_others'], [], undefined, options),
   };
 
+  readonly signInMethods = {
+    /**
+     * Disconnect one linked sign-in identity (Google, GitHub, …) from your account — never the last way you can sign in.
+     *
+     * Requires scope `account:sign_in:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: critical.
+     *
+     * `DELETE /me/sign-in-methods/{identity_id}` · action `account.sign_in_methods.disconnect`
+     * @scope `account:sign_in:write`
+     * @danger critical
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    disconnect: <O extends CallOptions = CallOptions>(identityId: string, options?: O): Promise<Outcome<SignInMethodsDisconnectResponse, O>> =>
+      this.transport.call<SignInMethodsDisconnectResponse, O>(accountOperations['account.sign_in_methods.disconnect'], [identityId], undefined, options),
+  };
+
   readonly social = {
     /**
      * Disconnect a social account from yours — never the last way you can sign in.
@@ -349,6 +507,60 @@ export class AccountClient {
      */
     unlink: <O extends CallOptions = CallOptions>(provider: string, options?: O): Promise<Outcome<SocialUnlinkResponse, O>> =>
       this.transport.call<SocialUnlinkResponse, O>(accountOperations['account.social.unlink'], [provider], undefined, options),
+  };
+
+  readonly totp = {
+    /**
+     * Remove one of your authenticator apps.
+     *
+     * Requires scope `account:sign_in:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: critical.
+     *
+     * `DELETE /me/two-factor/apps/{factor_id}` · action `account.totp.remove`
+     * @scope `account:sign_in:write`
+     * @danger critical
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    remove: <O extends CallOptions = CallOptions>(factorId: string, options?: O): Promise<Outcome<TotpRemoveResponse, O>> =>
+      this.transport.call<TotpRemoveResponse, O>(accountOperations['account.totp.remove'], [factorId], undefined, options),
+    /**
+     * Rename one of your authenticator apps.
+     *
+     * Requires scope `account:sign_in:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: write.
+     *
+     * `PATCH /me/two-factor/apps/{factor_id}` · action `account.totp.rename`
+     * @scope `account:sign_in:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    rename: <O extends CallOptions = CallOptions>(factorId: string, body: TotpRenameBody, options?: O): Promise<Outcome<TotpRenameResponse, O>> =>
+      this.transport.call<TotpRenameResponse, O>(accountOperations['account.totp.rename'], [factorId], body, options),
+  };
+
+  readonly waitlists = {
+    /**
+     * Join a published service waitlist with your verified email. Does not buy a plan or grant access.
+     *
+     * Requires scope `account:waitlists:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: write.
+     *
+     * `POST /me/services/{program}/waitlist` · action `account.waitlists.join`
+     * @scope `account:waitlists:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    join: <O extends CallOptions = CallOptions>(program: string, body: WaitlistsJoinBody, options?: O): Promise<Outcome<WaitlistsJoinResponse, O>> =>
+      this.transport.call<WaitlistsJoinResponse, O>(accountOperations['account.waitlists.join'], [program], body, options),
+    /**
+     * Withdraw your own feature interest or beta application for a team. Active grants are managed by the service.
+     *
+     * Requires scope `account:waitlists:write` on an access token you delegated; it acts on your own account only. No management key is accepted. Danger: write.
+     *
+     * `POST /me/services/{program}/waitlist/leave` · action `account.waitlists.leave`
+     * @scope `account:waitlists:write`
+     * @danger write
+     * May be held for approval (`202 approval_required`); waited on unless `approval: 'return'`.
+     */
+    leave: <O extends CallOptions = CallOptions>(program: string, body: WaitlistsLeaveBody, options?: O): Promise<Outcome<WaitlistsLeaveResponse, O>> =>
+      this.transport.call<WaitlistsLeaveResponse, O>(accountOperations['account.waitlists.leave'], [program], body, options),
   };
 
 }

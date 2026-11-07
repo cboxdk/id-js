@@ -1,5 +1,6 @@
 import { Discovery } from './discovery.js';
 import { AuthenticationError, ConfigurationError } from './errors.js';
+import { assertSecureIssuer } from './issuer.js';
 
 /**
  * A permission your app declares. `key` is a `feature:action` slug (e.g.
@@ -204,6 +205,11 @@ export async function publishManifest(
   }
 
   const timeoutMs = config.timeoutMs ?? 10_000;
+  assertSecureIssuer(config.issuer);
+  const issuer = new URL(config.issuer);
+  if (issuer.username || issuer.password || issuer.search || issuer.hash) {
+    throw new ConfigurationError('The manifest issuer must not contain credentials, a query or a fragment.');
+  }
   const manifest = await buildManifest(declaration);
   const discovery = new Discovery(config.issuer, timeoutMs, 3_600_000);
 
@@ -213,6 +219,7 @@ export async function publishManifest(
     `${config.issuer.replace(/\/$/, '')}/api/v1/apps/manifest`,
     {
       method: 'POST',
+      redirect: 'error',
       headers: {
         authorization: `Bearer ${token}`,
         accept: 'application/json',
@@ -224,11 +231,26 @@ export async function publishManifest(
   );
 
   if (!response.ok) {
-    throw new AuthenticationError(`Manifest push failed: HTTP ${response.status} ${await response.text()}`);
+    throw new AuthenticationError(`Manifest push failed: HTTP ${response.status}`);
   }
 
-  const json = (await response.json()) as unknown;
-  return json !== null && typeof json === 'object' ? (json as ManifestSyncSummary) : {};
+  const json: unknown = await response.json().catch(() => {
+    throw new AuthenticationError('Cbox ID returned an invalid manifest acknowledgement.');
+  });
+  const checksum = await sha256Hex(canonicalManifestJson(declaration.permissions ?? [], declaration.roles ?? []));
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) {
+    throw new AuthenticationError('Cbox ID did not acknowledge the authorization manifest.');
+  }
+  const summary = json as ManifestSyncSummary;
+  if (summary.client_id !== config.clientId || summary.version !== manifest.version || summary.checksum !== checksum
+    || typeof summary.unchanged !== 'boolean' || !Number.isInteger(summary.roles_declared)
+    || !Number.isInteger(summary.permissions_declared)
+    || (summary.roles_declared ?? -1) < 0 || (summary.permissions_declared ?? -1) < 0
+    || (!summary.unchanged && (summary.roles_declared !== manifest.roles.length
+      || summary.permissions_declared !== manifest.permissions.length))) {
+    throw new AuthenticationError('Cbox ID did not acknowledge this app and its complete authorization manifest.');
+  }
+  return summary;
 }
 
 async function mintToken(
@@ -241,6 +263,7 @@ async function mintToken(
     {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      redirect: 'error',
       body: new URLSearchParams({
         grant_type: 'client_credentials',
         client_id: config.clientId,
@@ -252,7 +275,7 @@ async function mintToken(
   );
 
   const json = (await response.json().catch(() => ({}))) as { access_token?: unknown };
-  if (typeof json.access_token !== 'string' || json.access_token === '') {
+  if (!response.ok || typeof json.access_token !== 'string' || json.access_token === '') {
     throw new AuthenticationError(
       'Could not obtain an apps.manifest access token — check the client credentials and that the client holds the apps.manifest scope.',
     );
@@ -448,6 +471,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
+  } catch {
+    throw new AuthenticationError('Cbox ID manifest publication could not be verified.');
   } finally {
     clearTimeout(timer);
   }

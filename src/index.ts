@@ -64,6 +64,8 @@ export type {
   ClaimSource,
 } from './claims.js';
 export { defineAuthz, buildManifest, publishManifest } from './authz.js';
+export { checkPermissions, PermissionDecision } from './decisions.js';
+export type { PermissionDecisionConfig } from './decisions.js';
 export type {
   PermissionDefinition,
   RoleDefinition,

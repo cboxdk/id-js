@@ -8,6 +8,7 @@ import {
   defineAuthz,
   publishManifest,
   type AuthzDeclaration,
+  type AuthzManifest,
   type PermissionDefinition,
   type RoleDefinition,
 } from '../src/index.js';
@@ -67,6 +68,17 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json' },
   });
+}
+
+function acknowledged(body: string): Record<string, unknown> {
+  const manifest = JSON.parse(body) as AuthzManifest;
+  const permissions = manifest.permissions.map(p => ({ ...p, ...(p.tenant_assignable === undefined ? {} : { tenantAssignable: p.tenant_assignable }) }));
+  const roles = manifest.roles.map(r => ({ ...r, ...(r.tenant_assignable === undefined ? {} : { tenantAssignable: r.tenant_assignable }) }));
+  return {
+    unchanged: false, roles_declared: roles.length, permissions_declared: permissions.length,
+    client_id: config.clientId, version: manifest.version,
+    checksum: createHash('sha256').update(canonicalManifestJson(permissions, roles)).digest('hex'),
+  };
 }
 
 describe('buildManifest', () => {
@@ -270,14 +282,14 @@ describe('publishManifest', () => {
         return json({ access_token: 'manifest-token', token_type: 'Bearer' });
       }
       if (url === `${ISSUER}/api/v1/apps/manifest`) {
-        return json({ unchanged: false, roles_declared: 1, permissions_declared: 2 });
+        return json(acknowledged(String(init?.body)));
       }
       return new Response('not found', { status: 404 });
     });
     vi.stubGlobal('fetch', mock);
 
     const summary = await publishManifest(config, declaration);
-    expect(summary).toEqual({ unchanged: false, roles_declared: 1, permissions_declared: 2 });
+    expect(summary).toMatchObject({ unchanged: false, roles_declared: 1, permissions_declared: 2, client_id: config.clientId });
 
     // The token request used the client-credentials grant scoped to apps.manifest.
     const tokenCall = calls.find((c) => c.url === discovery.token_endpoint);
@@ -318,7 +330,7 @@ describe('publishManifest', () => {
           return json({ access_token: 'manifest-token', token_type: 'Bearer' });
         }
         pushed = JSON.parse(String(init?.body));
-        return json({ unchanged: false });
+        return json(acknowledged(String(init?.body)));
       }),
     );
 
@@ -346,6 +358,20 @@ describe('publishManifest', () => {
     vi.stubGlobal('fetch', mock);
 
     await expect(publishManifest(config, declaration)).rejects.toThrowError(/422/);
+  });
+
+  it.each([
+    { client_id: 'another-client' }, { version: 'stale' }, { checksum: 'incorrect' },
+    { roles_declared: 0 }, { permissions_declared: 0 }, { unchanged: 'false' },
+    { unchanged: true, roles_declared: -1 }, { unchanged: true, permissions_declared: -1 },
+  ])('refuses an unbound or incomplete acknowledgement: %j', async (override) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (String(input).endsWith('/.well-known/openid-configuration')) return json(discovery);
+      if (String(input) === discovery.token_endpoint) return json({ access_token: 'manifest-token' });
+      expect(init?.redirect).toBe('error');
+      return json({ ...acknowledged(String(init?.body)), ...override });
+    }));
+    await expect(publishManifest(config, declaration)).rejects.toThrow(/acknowledge/);
   });
 
   it('throws when no apps.manifest token can be minted', async () => {
