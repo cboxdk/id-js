@@ -3,7 +3,7 @@
 All notable changes to `@cboxdk/id-js` are recorded here. Earlier releases are described
 in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
-## [0.20.0] — prepared candidate, not published
+## [0.20.0] - 2026-11-07
 
 ### Upgrade
 
