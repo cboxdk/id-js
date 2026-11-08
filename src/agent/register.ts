@@ -17,7 +17,8 @@ export interface RegisterAgentClientOptions extends AgentServerOptions {
   scope?: string | string[];
   /**
    * `private_key_jwt` (default): a key pair is generated (or `keyPair` used) and the
-   * public half registered inline as `jwks`. `none`: a public client — device grant only.
+   * public half registered inline as `jwks`. `none`: a public client — the device grant,
+   * or CIBA where the resource allows keyless clients. `private_key_jwt` is recommended for CIBA.
    */
   tokenEndpointAuthMethod?: 'private_key_jwt' | 'none';
   /** Algorithm for the generated key pair. Default ES256. */

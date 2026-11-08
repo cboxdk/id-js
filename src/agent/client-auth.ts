@@ -29,8 +29,10 @@ export interface ClientKeyPair {
  *   The right choice for a self-registered agent or CLI: nothing secret ever crosses the
  *   wire, and the server stores only the public key.
  * - `client_secret_basic` / `client_secret_post`: a console-issued secret.
- * - `none`: a public client names itself by `client_id`. Fine for the device grant;
- *   the backchannel endpoint refuses it (`invalid_client`) because CIBA has no front
+ * - `none`: a public client names itself by `client_id` only. Fine for the device grant.
+ *   For CIBA, Cbox ID accepts a keyless self-registered client only when the resource
+ *   allows it (`dynamic_public_backchannel`); otherwise the answer is `invalid_target`.
+ *   Prefer `private_key_jwt` for CIBA: a public `client_id` proves nothing, and CIBA has no front
  *   channel to bind the flow to.
  */
 export type ClientAuth =

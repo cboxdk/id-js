@@ -26,15 +26,16 @@ export class ExpiredTokenError extends AgentGrantError {}
 export class InvalidGrantError extends AgentGrantError {}
 
 /**
- * The `resource` (RFC 8707) is not one this client may ask for, or the poll named a
- * different resource than the request that started it (`invalid_target`).
+ * The `resource` (RFC 8707) is not one this client may ask for, the poll named a
+ * different resource than the request that started it, or the resource lets
+ * self-registered clients use CIBA only with `private_key_jwt` and this one is keyless
+ * (`invalid_target`).
  */
 export class InvalidTargetError extends AgentGrantError {}
 
 /**
  * Client authentication failed (`invalid_client`): an unknown `client_id`, a bad secret, an
- * assertion signed by a key the server does not hold, a replayed `jti`, or a public client
- * calling the backchannel endpoint, which only confidential clients may.
+ * assertion signed by a key the server does not hold, or a replayed `jti`.
  */
 export class InvalidClientError extends AgentGrantError {}
 

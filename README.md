@@ -296,6 +296,10 @@ console.log(`Approve in Cbox ID. Check that it shows ${code}.`);
 const tokens = await waitForBackchannelToken({ issuer, client, authorization });
 ```
 
+Self-registered clients must send `resource` and `binding_message`. Register with
+`private_key_jwt` for CIBA: a keyless (`none`) client can use CIBA only where the resource
+allows it, and is otherwise refused with `invalid_target`.
+
 See [docs/ciba-and-device-grant.md](docs/ciba-and-device-grant.md) for when to use each flow,
 a complete Node CLI and the error table.
 

@@ -24,7 +24,7 @@ Use it instead of writing the polling loop yourself. It handles the interval, `s
 | Who starts it | Your program, naming the person (`login_hint`) | Your program, for whoever enters the code |
 | What the person does | Taps **Approve** in Cbox ID (an email or a notification) and checks that the code matches | Opens a URL and types a code |
 | Your program must know who the person is | Yes: a Cbox ID user id or a confirmed email | No |
-| Client authentication | Confidential only: `private_key_jwt` or a secret. Public clients get `invalid_client` | `none` works |
+| Client authentication | `private_key_jwt` (recommended) or a secret. Keyless (`none`) only where the resource allows it | `none` works |
 | Good for | Agents and CLIs that already know their user and ask again later (a background agent asking before a sensitive step) | First sign-in on a new machine, or a tool that does not know who will use it |
 
 Rule of thumb: use the device grant when you do not know who the person is yet. Use CIBA once
@@ -36,7 +36,13 @@ to approve before it acts.
 - **`binding_message`**: required for self-registered clients. Cbox ID shows it beside
   Approve, so put a short code from `createBindingCode()` in it and print the same code in
   your terminal. The person approves only when the two match. At most 255 characters.
-- **`resource`** (RFC 8707): required for self-registered clients. Name the API the token is
+- **Keyless CIBA only where the resource allows it.** A self-registered `none` client may use
+  CIBA only when the resource has `dynamic_public_backchannel` switched on. Otherwise Cbox ID
+  answers `invalid_target` ("this resource lets self-registered clients use CIBA only with
+  private_key_jwt"). Use `private_key_jwt` for CIBA unless you have a reason not to: a
+  public `client_id` proves nothing about who is asking.
+- **`resource`** (RFC 8707): required for self-registered clients, even though the
+  TypeScript option is optional (console-registered apps may omit it). Name the API the token is
   for. The poll re-sends the same value automatically, and a mismatch is `invalid_target`.
 - **No `user_code`**: Cbox ID does not support `backchannel_user_code_parameter`, so the
   helper never sends one.
@@ -177,10 +183,10 @@ response body.
 | `access_denied` | `AccessDeniedError` | The person declined | Stop. Don't retry by yourself |
 | `expired_token` | `ExpiredTokenError` | Nobody approved before `expires_in` (also thrown locally) | Start a new request |
 | `invalid_grant` | `InvalidGrantError` | The `auth_req_id`, `device_code` or refresh token is not valid | Start again. For a refresh token, sign in again |
-| `invalid_target` | `InvalidTargetError` | The `resource` isn't allowed for this client, or doesn't match the start request | Fix the resource |
-| `invalid_client` | `InvalidClientError` | Unknown client, wrong secret, assertion signed by an unregistered key, replayed `jti`, or a public client calling CIBA | Check the stored credentials. Register again if the client was deleted |
+| `invalid_target` | `InvalidTargetError` | The `resource` isn't allowed for this client, doesn't match the start request, or the resource allows CIBA for self-registered clients only with `private_key_jwt` and this client is keyless | Fix the resource, or register with `private_key_jwt` |
+| `invalid_client` | `InvalidClientError` | Unknown client, wrong secret, assertion signed by an unregistered key, replayed `jti` | Check the stored credentials. Register again if the client was deleted |
 | `unknown_user_id` | `UnknownUserIdError` | `login_hint` doesn't match anyone the server can reach | Ask for the right user id or email |
-| `invalid_binding_message` | `InvalidBindingMessageError` | Missing (self-registered clients) or longer than 255 characters | Send a short message with a code |
+| `invalid_binding_message` | `InvalidBindingMessageError` | Missing (required from self-registered clients) or longer than 255 characters | Send a short message with a code |
 | `slow_down` / HTTP 429 | `SlowDownError` | Rate limited. `retryAfter` is in seconds | The wait helpers handle it. From `start*` or `registerAgentClient`, wait `retryAfter` and retry |
 | (cancelled) | `GrantCancelledError` | Your `AbortSignal` fired | None |
 | anything else | `AgentGrantError` | For example `invalid_scope`, `unauthorized_client`, or a 5xx | Check `error` and `status` |
@@ -210,4 +216,4 @@ A missing endpoint (for example, registration switched off on the instance) thro
 
 Every call also takes `metadata` (to skip discovery), `fetch`, `timeoutMs` and `signal`.
 `client` is a `ClientAuth`: `private_key_jwt` (a `CryptoKey` or private JWK),
-`client_secret_basic`, `client_secret_post` or `none`.
+`client_secret_basic`, `client_secret_post` or `none` (which sends `client_id` only).

@@ -61,7 +61,11 @@ export interface StartBackchannelOptions extends ClientOptions {
    * code locally. Required by Cbox ID for self-registered clients; at most 255 characters.
    */
   bindingMessage: string;
-  /** RFC 8707 resource indicator(s) — the API the token is for. Required for self-registered clients. */
+  /**
+   * RFC 8707 resource indicator(s) — the API the token is for. Optional in the type, but
+   * REQUIRED by Cbox ID for self-registered clients.
+   * Its settings also decide whether a keyless (`none`) client may use CIBA at all.
+   */
   resource?: string | string[];
   /** Seconds the request may wait for approval (the server may shorten it). */
   requestedExpiry?: number;

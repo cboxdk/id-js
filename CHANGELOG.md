@@ -17,7 +17,8 @@ in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 - `registerAgentClient()`: RFC 7591 dynamic registration with `private_key_jwt` (an ES256 or
   RS256 key from `generateClientKeyPair()`, sent inline as `jwks`) or `none`.
   `createClientAssertion()` signs the RFC 7523 assertion (`aud` = token endpoint, single-use
-  `jti`, at most 60 s).
+  `jti`, at most 60 s). `startBackchannel` also accepts a keyless `none` client (sends
+  `client_id` only), which Cbox ID allows only where the resource permits it.
 - `discoverAuthorizationServer()` reads `/.well-known/oauth-authorization-server` and checks
   the issuer.
 - `createBindingCode()`: a short code from an alphabet without look-alike characters, for the

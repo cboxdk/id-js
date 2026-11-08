@@ -347,6 +347,64 @@ describe('startBackchannel', () => {
     expect((error as AgentGrantError).errorDescription).toBe('nope');
   });
 
+  it('lets a keyless (none) client start CIBA with client_id only', async () => {
+    const server = fakeServer({ '/oauth/backchannel_authentication': { body: backchannel } });
+
+    await startBackchannel({
+      issuer: ISSUER,
+      metadata,
+      fetch: server.fetch,
+      client: { method: 'none', clientId: 'public-1' },
+      loginHint: 'user-1',
+      scope: 'openid',
+      bindingMessage: 'K7QM',
+      resource: 'https://brain.test/api',
+    });
+
+    const request = server.to('/oauth/backchannel_authentication')[0]!;
+    const form = new URLSearchParams(request.body);
+    expect(form.get('client_id')).toBe('public-1');
+    expect(form.has('client_assertion')).toBe(false);
+    expect(form.has('client_secret')).toBe(false);
+    expect(request.headers.get('authorization')).toBeNull();
+  });
+
+  it('maps a resource that requires private_key_jwt for CIBA to InvalidTargetError', async () => {
+    const server = fakeServer({
+      '/oauth/backchannel_authentication': {
+        status: 400,
+        body: { error: 'invalid_target', error_description: 'this resource lets self-registered clients use CIBA only with private_key_jwt' },
+      },
+    });
+
+    const error = await startBackchannel({
+      issuer: ISSUER,
+      metadata,
+      fetch: server.fetch,
+      client: { method: 'none', clientId: 'public-1' },
+      loginHint: 'user-1',
+      scope: 'openid',
+      bindingMessage: 'K7QM',
+      resource: 'https://brain.test/api',
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(InvalidTargetError);
+    expect((error as InvalidTargetError).status).toBe(400);
+    expect((error as InvalidTargetError).errorDescription).toMatch(/private_key_jwt/);
+  });
+
+  it('throws SlowDownError with Retry-After when starting is rate limited', async () => {
+    const server = fakeServer({ '/oauth/backchannel_authentication': { status: 429, body: { error: 'slow_down' }, headers: { 'retry-after': '12' } } });
+
+    const error = await startBackchannel({
+      issuer: ISSUER, metadata, fetch: server.fetch, client: { method: 'none', clientId: 'c' },
+      loginHint: 'x', scope: 'openid', bindingMessage: 'K7QM',
+    }).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(SlowDownError);
+    expect((error as SlowDownError).retryAfter).toBe(12);
+  });
+
   it('refuses a resource that is not an absolute URI before sending anything', async () => {
     const server = fakeServer({});
     await expect(
