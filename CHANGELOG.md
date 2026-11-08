@@ -5,6 +5,8 @@ in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-08
+
 ### Added
 
 - `@cboxdk/id-js/agent`: OpenID CIBA (poll mode) and the RFC 8628 device grant for agents and
