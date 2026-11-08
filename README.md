@@ -276,6 +276,33 @@ want the person re-approving every hour.
 See [Sign in from a CLI](https://github.com/cboxdk/cbox-id/blob/main/docs/getting-started/sign-in-from-a-cli.md)
 for the protocol itself and where to store the tokens.
 
+### Agents and self-registering CLIs (CIBA and device grant)
+
+`@cboxdk/id-js/agent` is for a CLI or an agent that registers itself (RFC 7591) and gets a
+token for a person without a redirect: OpenID CIBA, where the person taps Approve in Cbox ID,
+or the device grant. It generates a `private_key_jwt` key with WebCrypto, signs the client
+assertions, and polls following the server's rules (`interval`, `slow_down`, 429
+`Retry-After`, expiry, Ctrl-C). Refusals are typed errors.
+
+```ts
+import { startBackchannel, waitForBackchannelToken, createBindingCode } from '@cboxdk/id-js/agent';
+
+const code = createBindingCode(); // e.g. "K7QM", shown beside Approve
+const authorization = await startBackchannel({
+  issuer, client, loginHint: 'ada@acme.com', scope: 'openid mcp:read',
+  bindingMessage: `Brain CLI: ${code}`, resource: 'https://app.cboxbrain.com/mcp',
+});
+console.log(`Approve in Cbox ID. Check that it shows ${code}.`);
+const tokens = await waitForBackchannelToken({ issuer, client, authorization });
+```
+
+Self-registered clients must send `resource` and `binding_message`. Register with
+`private_key_jwt` for CIBA: a keyless (`none`) client can use CIBA only where the resource
+allows it, and is otherwise refused with `invalid_target`.
+
+See [docs/ciba-and-device-grant.md](docs/ciba-and-device-grant.md) for when to use each flow,
+a complete Node CLI and the error table.
+
 ## In the browser (publishable keys)
 
 Everything above needs a server: it holds your client secret. A **publishable key** is the
