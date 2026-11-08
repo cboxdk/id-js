@@ -21,7 +21,10 @@
     "authentication",
     "sso",
     "nextjs",
-    "cbox-id"
+    "cbox-id",
+    "ciba",
+    "device-flow",
+    "agents"
   ],
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -47,6 +50,11 @@
       "types": "./dist/management.d.ts",
       "import": "./dist/management.js",
       "require": "./dist/management.cjs"
+    },
+    "./agent": {
+      "types": "./dist/agent.d.ts",
+      "import": "./dist/agent.js",
+      "require": "./dist/agent.cjs"
     }
   },
   "files": [

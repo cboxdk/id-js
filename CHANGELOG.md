@@ -3,6 +3,31 @@
 All notable changes to `@cboxdk/id-js` are recorded here. Earlier releases are described
 in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
+## [Unreleased]
+
+### Added
+
+- `@cboxdk/id-js/agent`: OpenID CIBA (poll mode) and the RFC 8628 device grant for agents and
+  CLIs, so they no longer need their own polling loop. `startBackchannel` / `pollBackchannel` /
+  `waitForBackchannelToken`, `startDeviceAuthorization` / `pollDeviceAuthorization` /
+  `waitForDeviceToken` and `refreshAgentTokens`. The wait helpers use the server's `interval`,
+  add 5 s on `slow_down` (and on 429, waiting at least `Retry-After`), keep polling on
+  `authorization_pending`, stop at `expires_in`, and take an `AbortSignal` and an injectable
+  `sleep`. `resource` (RFC 8707) is re-sent on every poll. No `user_code` is ever sent.
+- `registerAgentClient()`: RFC 7591 dynamic registration with `private_key_jwt` (an ES256 or
+  RS256 key from `generateClientKeyPair()`, sent inline as `jwks`) or `none`.
+  `createClientAssertion()` signs the RFC 7523 assertion (`aud` = token endpoint, single-use
+  `jti`, at most 60 s).
+- `discoverAuthorizationServer()` reads `/.well-known/oauth-authorization-server` and checks
+  the issuer.
+- `createBindingCode()`: a short code from an alphabet without look-alike characters, for the
+  `binding_message` that Cbox ID requires from self-registered clients.
+- Typed errors: `AccessDeniedError`, `ExpiredTokenError`, `InvalidGrantError`,
+  `InvalidTargetError`, `InvalidClientError`, `UnknownUserIdError`,
+  `InvalidBindingMessageError`, `SlowDownError` (with `retryAfter`), all subclasses of
+  `AgentGrantError` (an `AuthenticationError`), plus `GrantCancelledError`.
+- Guide: `docs/ciba-and-device-grant.md`.
+
 ## [0.20.0] - 2026-11-07
 
 ### Upgrade
