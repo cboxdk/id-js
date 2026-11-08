@@ -289,8 +289,8 @@ import { startBackchannel, waitForBackchannelToken, createBindingCode } from '@c
 
 const code = createBindingCode(); // e.g. "K7QM", shown beside Approve
 const authorization = await startBackchannel({
-  issuer, client, loginHint: 'ada@acme.com', scope: 'openid brain.read',
-  bindingMessage: `Brain CLI: ${code}`, resource: 'https://brain.cbox.dk/api',
+  issuer, client, loginHint: 'ada@acme.com', scope: 'openid mcp:read',
+  bindingMessage: `Brain CLI: ${code}`, resource: 'https://app.cboxbrain.com/mcp',
 });
 console.log(`Approve in Cbox ID. Check that it shows ${code}.`);
 const tokens = await waitForBackchannelToken({ issuer, client, authorization });

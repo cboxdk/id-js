@@ -71,7 +71,7 @@ import {
 } from '@cboxdk/id-js/agent';
 
 const issuer = process.env.CBOX_ID_ISSUER; // e.g. https://acme.cboxid.com
-const resource = 'https://brain.cbox.dk/api';
+const resource = 'https://app.cboxbrain.com/mcp';
 const dir = join(homedir(), '.config', 'brain');
 const file = join(dir, 'client.json');
 
@@ -85,7 +85,7 @@ if (stored === null) {
     metadata,
     clientName: `Cbox Brain CLI (${process.env.USER ?? 'unknown'})`,
     grantTypes: [CIBA_GRANT_TYPE, 'refresh_token'],
-    scope: 'openid brain.read brain.write offline_access',
+    scope: 'openid mcp:read mcp:write offline_access',
   });
   stored = { clientId: registered.clientId, privateJwk: registered.keyPair.privateJwk };
   await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -101,7 +101,7 @@ const authorization = await startBackchannel({
   metadata,
   client,
   loginHint: process.argv[2], // the person's Cbox ID user id or confirmed email
-  scope: 'openid brain.read brain.write offline_access',
+  scope: 'openid mcp:read mcp:write offline_access',
   bindingMessage: `Brain CLI wants access: ${code}`,
   resource,
 });
@@ -147,10 +147,10 @@ const { auth: client } = await registerAgentClient({
   clientName: 'Cbox Brain CLI',
   grantTypes: [DEVICE_CODE_GRANT_TYPE, 'refresh_token'],
   tokenEndpointAuthMethod: 'none',
-  scope: 'openid brain.read offline_access',
+  scope: 'openid mcp:read offline_access',
 });
 
-const device = await startDeviceAuthorization({ issuer, client, scope: 'openid brain.read offline_access', resource });
+const device = await startDeviceAuthorization({ issuer, client, scope: 'openid mcp:read offline_access', resource });
 console.log(`Open ${device.verificationUri} and enter ${device.userCode}`);
 const tokens = await waitForDeviceToken({ issuer, client, authorization: device });
 ```
