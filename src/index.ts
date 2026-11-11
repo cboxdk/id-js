@@ -18,6 +18,14 @@ export { CboxIdClient } from './client.js';
 export type { CallbackParams, StoredAuthState } from './client.js';
 export type { DeviceAuthorization } from './types.js';
 export { verifyWebhook, verifyStandardWebhook } from './webhook.js';
+export {
+  WEBHOOK_EVENT_PREFIX,
+  currentWebhookEventType,
+  legacyWebhookEventType,
+  webhookEventTypeAliases,
+  isWebhookEventType,
+} from './webhook-events.js';
+export { rawId, isPrefixedId, sameId } from './ids.js';
 export type { VerifyWebhookOptions, VerifyStandardWebhookOptions, WebhookHeaders } from './webhook.js';
 export {
   VaultClient,

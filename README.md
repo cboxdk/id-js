@@ -577,6 +577,19 @@ const ok = await verifyWebhook({
 });
 ```
 
+Cbox ID is renaming its event types to `id.*` (`organization.member_added` →
+`id.organization.member_added`, `user.login` → `id.user.signed_in`), and a delivery may carry
+either name for a while. Compare types with `isWebhookEventType`, which treats both as one:
+
+```ts
+import { isWebhookEventType } from '@cboxdk/id-js';
+
+if (isWebhookEventType(event.type, 'organization.member_added')) { /* old or id.* name */ }
+```
+
+`currentWebhookEventType`, `legacyWebhookEventType` and `webhookEventTypeAliases` convert
+between them.
+
 ### Standard Webhooks
 
 An endpoint registered with `signature_scheme: 'standard_webhooks'` (or switched with
@@ -756,6 +769,37 @@ Method names are the server's action names: `apps.secrets.rotate` is
 `env.sso.connections.requireSso(...)`. Path parameters come first, in path order, then the body
 (or the query, for a read), then per-call options. Every call resolves to
 `{ data, meta, body, status, replayed, idempotencyKey, requestId, headers }`.
+
+### Cbox ID v3: `api.cboxid.com/v1`
+
+Cbox ID v3 serves every plane on one host. Pass `apiUrl` and the same clients, with the same
+methods and arguments, call it:
+
+```ts
+import { EnvironmentClient, OrganizationClient } from '@cboxdk/id-js/management';
+
+const env = new EnvironmentClient({ apiUrl: 'https://api.cboxid.com', apiKey: process.env.CBOX_ID_ENV_KEY! });
+const org = new OrganizationClient({ apiUrl: 'https://api.cboxid.com', apiKey: process.env.CBOX_ID_ORGANIZATION_KEY! }); // cbid_org_… or cbid_ws_…
+```
+
+- Without `apiUrl` nothing changes: calls go to `{baseUrl}/api/v1`, which keeps answering
+  for now.
+- With it, each operation goes to its `/v1` route (`v1Routes`), and the credential picks the
+  environment. A child is addressed by its own id there: `env.apps.secrets.revoke(appId, secretId)`
+  becomes `DELETE /v1/app-secrets/{secretId}?app_id={appId}`.
+- `data` is still the items of a list or the object itself; `meta` carries `has_more` and
+  `next_cursor`, and `listAll()` follows the cursor. Errors are RFC 9457 problems, read into
+  the same `CboxIdApiError`. Approvals poll `/v1/approvals/{id}`.
+- A few operations have no `/v1` route yet (`v1Unmapped`). Pass `baseUrl` as well and the
+  client calls them on `{baseUrl}/api/v1`; without it they throw a `ConfigurationError`.
+- `request(method, path)` paths are relative to `/v1` on such a client.
+- `OrganizationClient`, `organizationOperations` and `OrganizationApi` are the workspace
+  plane's client, table and types under the name Cbox ID uses now; the workspace names stay.
+- Ids come back prefixed (`org_01J…`) and either spelling is accepted as input. Token claims
+  keep the raw id, so compare with `sameId(a, b)` (also `rawId`, `isPrefixedId` from
+  `@cboxdk/id-js`), never `===`.
+- `publishManifest({ …, apiUrl })` pushes to `/v1/app-manifests`, and
+  `new VaultClient(issuer, token, timeoutMs, { apiUrl })` leases from `/v1`.
 
 ### Create an app and rotate its secret
 
@@ -956,7 +1000,9 @@ calls a route that is not generated.
 The specs are vendored in `openapi/`. `npm run generate` (Node 22.6 or later) regenerates
 `src/management/generated/` from them, and
 `npm run generate -- --fetch environment=https://acme.cboxid.com` (or `workspace=`, `platform=`,
-`account=`, `all=`) refreshes a vendored spec from a running server first. The test suite fails
+`account=`, `all=`) refreshes a vendored spec from a running server first.
+`--fetch v1=https://api.cboxid.com` refreshes `openapi/openapi.json`, the v3 document the
+`/v1` route table (`src/management/generated/v1-routes.ts`) is generated from. The test suite fails
 when the generated code and the vendored specs disagree.
 
 ## Security & scope

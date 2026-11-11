@@ -7,6 +7,8 @@
  *                                                     refresh one vendored spec from a live host
  *   npm run generate -- --fetch all=https://id.example.com
  *                                                     refresh all four from one (self-hosted) host
+ *   npm run generate -- --fetch v1=https://api.cboxid.com
+ *                                                     refresh openapi/openapi.json (Cbox ID v3)
  *   npm run generate -- --check                       exit 1 when the generated code is stale
  *
  * A small, dependency-light generator on purpose: the output is meant to be read. It knows
@@ -544,7 +546,7 @@ class Generator {
 
     out.push(
       defaultBase === undefined
-        ? `/** Options for a {@link ${config.className}}. \`baseUrl\` is required: the environment's own host. */\nexport type ${optionsType} = ManagementClientOptions & { baseUrl: string };\n`
+        ? `/** Options for a {@link ${config.className}}. \`baseUrl\` (the environment's own host) or \`apiUrl\` (Cbox ID v3) is required. */\nexport type ${optionsType} = ManagementClientOptions & ({ baseUrl: string } | { apiUrl: string });\n`
         : `/** Options for a {@link ${config.className}}. \`baseUrl\` defaults to \`${defaultBase}\`. */\nexport type ${optionsType} = ManagementClientOptions;\n`,
     );
 
@@ -678,14 +680,238 @@ export function generatePlane(spec: Json, config: PlaneConfig): { code: string; 
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * Cbox ID v3 serves every plane on one host, `https://api.cboxid.com/v1`, described by one
+ * document (`openapi/openapi.json`). The clients keep today's methods and today's paths;
+ * a client given `apiUrl` sends each operation to its `/v1` route instead, which this table
+ * names: keyed `"<plane> <METHOD> <today's path>"`, it says the `/v1` method and path and
+ * where each of today's path arguments goes there (the path, the query or the body).
+ */
+const V1_FILE = 'openapi.json';
+
+/** The `operationId` prefix the v3 document gives each plane's operations. */
+const V1_PLANE_PREFIX: Record<PlaneConfig['plane'], string> = {
+  environment: 'environment_',
+  workspace: 'organization_',
+  platform: 'admin_',
+  account: 'account_',
+};
+
+/**
+ * Actions v3 renamed, as `"<plane>:<today's action>"` → v3 action. Everything else keeps its
+ * action name. Left out on purpose (no `/v1` route takes today's input as it is, so the
+ * client keeps calling today's path for them): `organizations.domains.capture` (`enabled`
+ * became `capture`) and `platform.workspaces.*` (v3 folds them into
+ * `/v1/admin/organizations`, which needs the environment).
+ */
+const V1_ACTION_ALIASES: Record<string, string> = {
+  'workspace:workspace.get': 'organization.get',
+  'workspace:workspace.settings.update': 'organization.settings.update',
+  'workspace:keys.workspace.list': 'keys.organization.list',
+  'workspace:keys.workspace.create': 'keys.organization.create',
+  'workspace:keys.workspace.revoke': 'keys.organization.revoke',
+  'workspace:keys.environment.revoke': 'keys.revoke',
+  'workspace:team.role': 'team.environment_access',
+  'environment:organizations.domains.list': 'sso.domains.list',
+  'environment:organizations.domains.add': 'sso.domains.create',
+  'environment:organizations.domains.remove': 'sso.domains.delete',
+  'environment:organizations.domains.verify': 'sso.domains.verify',
+  'platform:platform.environments.create': 'admin.environments.create',
+  'platform:platform.environments.provision': 'admin.environments.provision',
+  'platform:platform.operators.create': 'admin.operators.create',
+  'platform:platform.operators.set_status': 'admin.operators.set_status',
+  'platform:platform.organizations.create': 'admin.tenant_organizations.create',
+  'platform:platform.organizations.move': 'admin.tenant_organizations.move',
+  'platform:platform.organizations.set_status': 'admin.tenant_organizations.move',
+};
+
+interface V1Operation {
+  method: string;
+  path: string;
+  action: string | null;
+  operationId: string | null;
+  pathParams: string[];
+  query: string[];
+  requiredQuery: string[];
+  bodyProps: string[];
+}
+
+type V1Arg = { in: 'path' } | { in: 'query' | 'body'; name: string };
+
+function v1Operations(spec: Json): V1Operation[] {
+  const components = isRecord(spec.components) ? spec.components : {};
+  const section = (kind: string): Json => (isRecord(components[kind]) ? (components[kind] as Json) : {});
+  const deref = (value: unknown, kind: string): Json => {
+    if (isRecord(value) && typeof value.$ref === 'string') {
+      const target = section(kind)[value.$ref.split('/').pop() ?? ''];
+      if (!isRecord(target)) throw new Error(`${V1_FILE}: unresolved ${value.$ref}`);
+      return target;
+    }
+    return isRecord(value) ? value : {};
+  };
+  const props = (schema: unknown, depth = 0): string[] => {
+    if (depth > 8) return [];
+    const s = deref(schema, 'schemas');
+    const own = isRecord(s.properties) ? Object.keys(s.properties) : [];
+    const nested = ['allOf', 'oneOf', 'anyOf'].flatMap((k) => (Array.isArray(s[k]) ? (s[k] as unknown[]).flatMap((x) => props(x, depth + 1)) : []));
+    return [...new Set([...own, ...nested])];
+  };
+  const out: V1Operation[] = [];
+  const paths = isRecord(spec.paths) ? spec.paths : {};
+
+  for (const [path, rawItem] of Object.entries(paths)) {
+    const item = deref(rawItem, 'pathItems');
+    const shared = Array.isArray(item.parameters) ? (item.parameters as unknown[]) : [];
+
+    for (const method of METHODS) {
+      const op = item[method];
+      if (!isRecord(op)) continue;
+      const parameters = [...shared, ...(Array.isArray(op.parameters) ? (op.parameters as unknown[]) : [])].map((p) => deref(p, 'parameters'));
+      const query = parameters.filter((p) => p.in === 'query' && typeof p.name === 'string');
+      const body = op.requestBody === undefined || op.requestBody === null ? {} : deref(op.requestBody, 'requestBodies');
+      const content = isRecord(body.content) ? body.content : {};
+      const json = isRecord(content['application/json']) ? (content['application/json'] as Json) : {};
+
+      out.push({
+        method: method.toUpperCase(),
+        path,
+        action: typeof op['x-action'] === 'string' ? op['x-action'] : null,
+        operationId: typeof op.operationId === 'string' ? op.operationId : null,
+        pathParams: [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!),
+        query: query.map((p) => p.name as string),
+        requiredQuery: query.filter((p) => p.required === true).map((p) => p.name as string),
+        bodyProps: props(json.schema),
+      });
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Where today's path arguments go on the `/v1` route. An argument named like a `/v1` query
+ * parameter goes there; of the rest, the last ones fill the `/v1` path parameters (a child
+ * is addressed by its own id now: `/apps/{id}/secrets/{secret_id}` → `/app-secrets/{id}`);
+ * any left over name the parent, in a required query parameter, else a body field, else a
+ * query parameter by today's name.
+ */
+function v1Args(oldParams: string[], target: V1Operation): V1Arg[] | null {
+  const args: (V1Arg | undefined)[] = oldParams.map((name) =>
+    target.query.includes(name) && !target.pathParams.includes(name) ? { in: 'query', name } : undefined,
+  );
+  const rest = oldParams.map((_, i) => i).filter((i) => args[i] === undefined);
+
+  if (rest.length < target.pathParams.length) {
+    return null;
+  }
+
+  const parents = rest.slice(0, rest.length - target.pathParams.length);
+
+  for (const i of rest.slice(parents.length)) {
+    args[i] = { in: 'path' };
+  }
+
+  const open = target.requiredQuery.filter((q) => !args.some((a) => a !== undefined && a.in === 'query' && a.name === q));
+
+  for (const i of parents) {
+    const name = oldParams[i]!;
+    const query = open.shift();
+    args[i] = query !== undefined ? { in: 'query', name: query } : target.bodyProps.includes(name) ? { in: 'body', name } : { in: 'query', name };
+  }
+
+  return args as V1Arg[];
+}
+
+/** The `/v1` route table (`src/management/generated/v1-routes.ts`). */
+export function generateV1Routes(v1Spec: Json, planeSpecs: Map<PlaneConfig, Json>): { code: string; mapped: number; unmapped: string[] } {
+  const v1 = v1Operations(v1Spec);
+  const lines: string[] = [];
+  const unmapped: string[] = [];
+
+  for (const [config, spec] of planeSpecs) {
+    for (const op of new Generator(spec, config).operations()) {
+      const key = `${config.plane} ${op.method} ${op.path}`;
+      const action = op.action === null ? null : (V1_ACTION_ALIASES[`${config.plane}:${op.action}`] ?? op.action);
+      let candidates = action === null ? [] : v1.filter((o) => o.action === action);
+
+      if (candidates.length > 1) {
+        candidates = candidates.filter((o) => o.operationId?.startsWith(V1_PLANE_PREFIX[config.plane]) ?? false);
+      }
+
+      const target = candidates.length === 1 ? candidates[0]! : null;
+      const args = target === null ? null : v1Args(op.pathParams, target);
+
+      if (target === null || args === null) {
+        unmapped.push(key);
+        continue;
+      }
+
+      const rendered = args.map((a) => (a.in === 'path' ? `{ in: 'path' }` : `{ in: '${a.in}', name: ${literal(a.name)} }`)).join(', ');
+      lines.push(`  ${literal(key)}: { method: '${target.method}', path: ${literal(target.path.replace(/^\/v1(?=\/)/, ''))}, args: [${rendered}] },`);
+    }
+  }
+
+  lines.sort();
+  unmapped.sort();
+
+  const code = [
+    `// GENERATED by scripts/generate-management.ts from openapi/${V1_FILE} and the plane documents — do not edit.`,
+    '// Regenerate with `npm run generate`.',
+    '',
+    "import type { V1Route } from '../types.js';",
+    '',
+    '/**',
+    ' * Where each operation is served on Cbox ID v3 (`{apiUrl}/v1`), keyed',
+    ' * `"<plane> <METHOD> <path relative to /api/v1>"`. An operation missing here has no `/v1`',
+    ' * route that takes its input unchanged, and keeps calling `/api/v1` on `baseUrl`.',
+    ' */',
+    'export const v1Routes: Readonly<Record<string, V1Route>> = {',
+    ...lines,
+    '};',
+    '',
+    '/** Operations without a `/v1` route: a client with `apiUrl` sends them to `/api/v1` on `baseUrl`. */',
+    `export const v1Unmapped: readonly string[] = [${unmapped.map((k) => `\n  ${literal(k)},`).join('')}\n];`,
+    '',
+  ].join('\n');
+
+  return { code, mapped: lines.length, unmapped };
+}
+
+/** Refresh `openapi/openapi.json`, the v3 document, from `{url}/openapi.json` (or the document's own URL). */
+async function fetchV1Spec(target: string): Promise<void> {
+  const url = target.endsWith('.json') ? target : `${target.replace(/\/+$/, '')}/openapi.json`;
+  const response = await fetch(url, { headers: { accept: 'application/json' } });
+
+  if (!response.ok) {
+    throw new Error(`GET ${url} answered ${response.status}`);
+  }
+
+  const parsed = (await response.json()) as unknown;
+
+  if (!isRecord(parsed) || typeof parsed.openapi !== 'string') {
+    throw new Error(`GET ${url} did not return an OpenAPI document`);
+  }
+
+  await writeFile(join(ROOT, 'openapi', V1_FILE), `${JSON.stringify(parsed, null, 2)}\n`);
+  process.stdout.write(`fetched v1 ← ${url}\n`);
+}
+
+
 /** Generate every plane from the vendored specs in `openapi/`. Keyed by output path. */
 export async function generateAll(root: string = ROOT): Promise<Map<string, { code: string; operations: number; skipped: string[] }>> {
   const results = new Map<string, { code: string; operations: number; skipped: string[] }>();
 
+  const specs = new Map<PlaneConfig, Json>();
+
   for (const config of PLANES) {
     const spec = parse(await readFile(join(root, 'openapi', `${config.file}.yaml`), 'utf8')) as Json;
+    specs.set(config, spec);
     results.set(join(root, 'src', 'management', 'generated', `${config.file}.ts`), generatePlane(spec, config));
   }
+
+  const v1Spec = JSON.parse(await readFile(join(root, 'openapi', V1_FILE), 'utf8')) as Json;
+  const routes = generateV1Routes(v1Spec, specs);
+  results.set(join(root, 'src', 'management', 'generated', 'v1-routes.ts'), { code: routes.code, operations: routes.mapped, skipped: routes.unmapped });
 
   return results;
 }
@@ -720,6 +946,11 @@ async function main(argv: string[]): Promise<number> {
       throw new Error('--fetch takes plane=url, e.g. --fetch environment=https://acme.cboxid.com');
     }
 
+    if (plane === 'v1') {
+      await fetchV1Spec(url);
+      continue;
+    }
+
     const targets = plane === 'all' ? PLANES : PLANES.filter((p) => p.plane === plane);
 
     if (targets.length === 0) {
@@ -746,7 +977,7 @@ async function main(argv: string[]): Promise<number> {
 
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, result.code);
-    process.stdout.write(`${path}: ${result.operations} operations${result.skipped.length > 0 ? `, skipped ${result.skipped.length} (other credentials)` : ''}\n`);
+    process.stdout.write(`${path}: ${result.operations} operations${result.skipped.length > 0 ? `, ${path.endsWith('v1-routes.ts') ? `${result.skipped.length} without a /v1 route` : `skipped ${result.skipped.length} (other credentials)`}` : ''}\n`);
   }
 
   if (stale) {

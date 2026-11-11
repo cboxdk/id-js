@@ -232,8 +232,8 @@ export const accountOperations = {
 
 // ── Client ─────────────────────────────────────────────────────────────────────────────────
 
-/** Options for a {@link AccountClient}. `baseUrl` is required: the environment's own host. */
-export type AccountClientOptions = ManagementClientOptions & { baseUrl: string };
+/** Options for a {@link AccountClient}. `baseUrl` (the environment's own host) or `apiUrl` (Cbox ID v3) is required. */
+export type AccountClientOptions = ManagementClientOptions & ({ baseUrl: string } | { apiUrl: string });
 
 /**
  * Cbox ID — My Account API.

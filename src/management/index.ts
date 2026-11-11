@@ -4,7 +4,8 @@
  *
  * - {@link EnvironmentClient}: one environment's tenancy, on its own host (`cbid_env_…` key
  *   or a delegated access token).
- * - {@link WorkspaceClient}: the workspace above its environments (`cbid_ws_…` key).
+ * - {@link OrganizationClient} (also exported as `WorkspaceClient`): the organization above
+ *   its environments (`cbid_org_…` or `cbid_ws_…` key).
  * - {@link PlatformClient}: the deployment itself, for operators (delegated token only).
  * - {@link AccountClient}: a person's own account (delegated token only).
  *
@@ -14,6 +15,9 @@ export { EnvironmentClient, environmentOperations } from './generated/environmen
 export type { EnvironmentClientOptions } from './generated/environment.js';
 export { WorkspaceClient, workspaceOperations } from './generated/workspace.js';
 export type { WorkspaceClientOptions } from './generated/workspace.js';
+export { OrganizationClient, organizationOperations } from './organization.js';
+export type { OrganizationClientOptions } from './organization.js';
+export { v1Routes, v1Unmapped } from './generated/v1-routes.js';
 export { PlatformClient, platformOperations } from './generated/platform.js';
 export type { PlatformClientOptions } from './generated/platform.js';
 export { AccountClient, accountOperations } from './generated/account.js';
@@ -22,6 +26,8 @@ export type { AccountClientOptions } from './generated/account.js';
 /** Every schema and operation type of each plane, as a namespace: `EnvironmentApi.App`. */
 export type * as EnvironmentApi from './generated/environment.js';
 export type * as WorkspaceApi from './generated/workspace.js';
+/** The organization plane's types: {@link WorkspaceApi} under its new name. */
+export type * as OrganizationApi from './generated/workspace.js';
 export type * as PlatformApi from './generated/platform.js';
 export type * as AccountApi from './generated/account.js';
 
@@ -72,4 +78,7 @@ export type {
   Pagination,
   PendingApproval,
   PendingApprovalResult,
+  V1Arg,
+  V1Route,
 } from './types.js';
+export { rawId, isPrefixedId, sameId } from '../ids.js';

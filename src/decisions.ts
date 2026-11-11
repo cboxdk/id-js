@@ -1,6 +1,7 @@
 import { AuthenticationError, ConfigurationError } from './errors.js';
 import { assertSecureIssuer } from './issuer.js';
 import type { OrganizationRole } from './claims.js';
+import { sameId } from './ids.js';
 
 export interface PermissionDecisionConfig {
   issuer: string;
@@ -77,8 +78,8 @@ export async function checkPermissions(
     }
     const data: unknown = JSON.parse(raw);
     if (!record(data) || !record(data.subject) || data.mode !== 'rbac'
-      || data.subject.type !== 'user' || data.subject.id !== subject
-      || data.organization !== organization || data.client_id !== config.clientId
+      || data.subject.type !== 'user' || !sameSubject(data.subject.id, subject)
+      || !sameSubject(data.organization, organization) || data.client_id !== config.clientId
       || typeof data.organization_active !== 'boolean' || typeof data.allowed !== 'boolean'
       || !(data.org_role === null || (typeof data.org_role === 'string'
         && ['owner', 'admin', 'developer', 'member', 'viewer'].includes(data.org_role)))
@@ -101,6 +102,12 @@ export async function checkPermissions(
     if (error instanceof AuthenticationError) throw error;
     throw new AuthenticationError('Permission decision could not be verified.');
   }
+}
+
+/** The same id, raw or prefixed (`org_01J…`); `null` only matches `null`. */
+function sameSubject(actual: unknown, expected: string | null): boolean {
+  if (actual === expected) return true;
+  return typeof actual === 'string' && sameId(actual, expected);
 }
 
 function record(value: unknown): value is Record<string, unknown> {

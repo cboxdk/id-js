@@ -1,5 +1,6 @@
 import { CboxIdError, ConfigurationError } from '../errors.js';
 import type { DPoPSigner } from './dpop.js';
+import { v1Routes } from './generated/v1-routes.js';
 import {
   ApprovalDeniedError,
   ApprovalError,
@@ -43,7 +44,23 @@ export interface ManagementClientOptions {
    * planes. `/api/v1` is appended unless it is already there.
    */
   baseUrl?: string;
-  /** A management key: `cbid_env_…` (environment plane) or `cbid_ws_…` (workspace plane). */
+  /**
+   * Cbox ID v3's API host, e.g. `https://api.cboxid.com` (`/v1` is appended unless it is
+   * already there). Left out, nothing changes: every call goes to `{baseUrl}/api/v1`.
+   *
+   * Set, every operation goes to its `/v1` route on this host instead — same methods on the
+   * client, same arguments — and Cbox ID works out the environment from the credential.
+   * Lists come back in the `/v1` envelope (`{object: "list", data, has_more, next_cursor}`);
+   * `data` is the items either way, and `meta` carries `has_more` / `next_cursor`. Errors
+   * are RFC 9457 problems, read into the same {@link CboxIdApiError}. The few operations
+   * with no `/v1` route yet (`v1Unmapped`) keep calling `/api/v1` on `baseUrl`, so a client
+   * that needs one of them sets both. `request()` paths are then relative to `/v1`.
+   */
+  apiUrl?: string;
+  /**
+   * A management key: `cbid_env_…` (environment plane), or `cbid_org_…` / `cbid_ws_…`
+   * (organization plane, the {@link OrganizationClient}).
+   */
   apiKey?: string;
   /**
    * A delegated OAuth access token, or a function returning one (called before every request,
@@ -88,6 +105,14 @@ const APPROVAL_MOUNT: Record<Plane, string> = {
   workspace: '/workspace',
   platform: '/platform',
   account: '/me',
+};
+
+/** Where each plane polls an approval on `/v1`, relative to `/v1`. */
+const V1_APPROVAL_MOUNT: Record<Plane, string> = {
+  environment: '/approvals',
+  workspace: '/approvals',
+  platform: '/admin/approvals',
+  account: '/me/approvals',
 };
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -180,6 +205,39 @@ function normalizeBaseUrl(raw: string): string {
   return `${url.origin}${path.endsWith('/api/v1') ? path : `${path}/api/v1`}`;
 }
 
+/** `apiUrl` as the `/v1` base: `https://api.cboxid.com` and `https://api.cboxid.com/v1` alike. */
+function normalizeApiUrl(raw: string): string {
+  const legacy = normalizeBaseUrl(raw.trim());
+  const path = legacy.slice(0, -'/api/v1'.length).replace(/\/v1$/, '');
+
+  return `${path}/v1`;
+}
+
+/** One request, resolved: where it goes and what it carries. */
+interface Resolved {
+  method: OperationSpec['method'];
+  path: string;
+  /** The path with its `{param}` placeholders, for `onApprovalRequired`. */
+  template: string;
+  base: string;
+  query: Record<string, unknown>;
+  body: Record<string, unknown>;
+}
+
+function fillPath(op: OperationSpec, template: string, values: readonly string[]): string {
+  let index = 0;
+
+  return template.replace(/\{([^}]+)\}/g, (_, name: string) => {
+    const value = values[index++];
+
+    if (value === undefined || value === '') {
+      throw new TypeError(`${op.action ?? op.path}: missing path parameter \`${name}\`.`);
+    }
+
+    return encodeURIComponent(value);
+  });
+}
+
 function appendQuery(params: URLSearchParams, key: string, value: unknown): void {
   if (value === undefined || value === null) {
     return;
@@ -222,7 +280,12 @@ async function readJson(response: Response): Promise<unknown> {
  */
 export class ManagementTransport {
   readonly plane: Plane;
+  /** Where requests go: `{baseUrl}/api/v1`, or `{apiUrl}/v1` when `apiUrl` is set. */
   readonly baseUrl: string;
+  /** Whether this client calls Cbox ID v3 (`apiUrl` was set). */
+  readonly v1: boolean;
+  /** With `apiUrl`: `{baseUrl}/api/v1` for operations with no `/v1` route, when there is a `baseUrl`. */
+  readonly legacyBaseUrl: string | undefined;
   readonly #options: ManagementClientOptions;
   readonly #fetch: typeof fetch;
   readonly #maxRetries: number;
@@ -232,8 +295,13 @@ export class ManagementTransport {
 
   constructor(plane: Plane, options: ManagementClientOptions, defaultBaseUrl?: string) {
     const baseUrl = options.baseUrl ?? defaultBaseUrl;
+    const apiUrl = options.apiUrl;
 
-    if (baseUrl === undefined || baseUrl === '') {
+    if (apiUrl !== undefined && apiUrl.trim() === '') {
+      throw new ConfigurationError('Management client `apiUrl` is empty. Leave it out to call `{baseUrl}/api/v1`.');
+    }
+
+    if (apiUrl === undefined && (baseUrl === undefined || baseUrl === '')) {
       throw new ConfigurationError(`The ${plane} management client needs a \`baseUrl\` (the environment's own host).`);
     }
 
@@ -287,7 +355,9 @@ export class ManagementTransport {
     }
 
     this.plane = plane;
-    this.baseUrl = normalizeBaseUrl(baseUrl);
+    this.v1 = apiUrl !== undefined;
+    this.legacyBaseUrl = baseUrl === undefined || baseUrl === '' ? undefined : normalizeBaseUrl(baseUrl);
+    this.baseUrl = apiUrl !== undefined ? normalizeApiUrl(apiUrl) : (this.legacyBaseUrl as string);
     this.#options = options;
     this.#fetch = options.fetch ?? ((input, init) => fetch(input, init));
     this.#maxRetries = Math.max(0, options.retry?.maxRetries ?? 3);
@@ -302,19 +372,37 @@ export class ManagementTransport {
     input?: unknown,
     options?: O,
   ): Promise<Outcome<TBody, O>> {
-    const url = this.#url(op, pathArgs, op.body ? undefined : input);
-    const payload = op.body ? input : undefined;
-    const idempotencyKey = WRITE_METHODS.has(op.method) ? options?.idempotencyKey ?? uuid() : undefined;
+    return this.#call<TBody, O>(op, pathArgs, input, options, false);
+  }
+
+  async #call<TBody, O extends CallOptions = CallOptions>(
+    op: OperationSpec,
+    pathArgs: readonly string[],
+    input: unknown,
+    options: O | undefined,
+    raw: boolean,
+  ): Promise<Outcome<TBody, O>> {
+    const resolved = this.#resolve(op, pathArgs, raw);
+    const method = resolved.method;
+    const url = this.#url(resolved, op.body ? undefined : input);
+    let payload = op.body ? input : undefined;
+
+    if (Object.keys(resolved.body).length > 0) {
+      // A parent id that was in today's path and is a body field on `/v1`.
+      payload = { ...(isRecord(payload) ? payload : {}), ...resolved.body };
+    }
+
+    const idempotencyKey = WRITE_METHODS.has(method) ? options?.idempotencyKey ?? uuid() : undefined;
     const send: SendOptions = {
       idempotencyKey,
       approvalId: options?.approvalId,
       signal: options?.signal,
       headers: options?.headers,
     };
-    const context: ApprovalContext = { action: op.action, danger: op.danger, method: op.method, path: op.path };
+    const context: ApprovalContext = { action: op.action, danger: op.danger, method, path: resolved.template };
 
-    const response = await this.#send(op.method, url, payload, send);
-    const held = await this.#heldApproval(response);
+    const response = await this.#send(method, url, payload, send);
+    const held = await this.#heldApproval(response, resolved.base);
 
     if (held !== null && options?.approval === 'return') {
       const result: PendingApprovalResult<TBody> = {
@@ -324,14 +412,14 @@ export class ManagementTransport {
         idempotencyKey,
         action: op.action,
         resume: (resumeOptions) =>
-          this.#approveAndRepeat<TBody>(op.method, url, payload, { ...send, signal: resumeOptions?.signal ?? send.signal }, held, context, false),
+          this.#approveAndRepeat<TBody>(method, url, payload, { ...send, signal: resumeOptions?.signal ?? send.signal }, held, context, false, resolved.base),
       };
 
       return result as Outcome<TBody, O>;
     }
 
     if (held !== null) {
-      return (await this.#approveAndRepeat<TBody>(op.method, url, payload, send, held, context, true)) as Outcome<TBody, O>;
+      return (await this.#approveAndRepeat<TBody>(method, url, payload, send, held, context, true, resolved.base)) as Outcome<TBody, O>;
     }
 
     return (await this.#result<TBody>(response, idempotencyKey)) as Outcome<TBody, O>;
@@ -364,7 +452,10 @@ export class ManagementTransport {
         return;
       }
 
-      if (op.pagination === 'page') {
+      if (this.v1 && typeof meta.next_cursor === 'string' && meta.next_cursor !== '') {
+        // `/v1` pages every list by cursor.
+        query = { ...query, after: meta.next_cursor };
+      } else if (op.pagination === 'page') {
         const current = typeof query.page === 'number' ? query.page : Number(query.page ?? 1);
         query = { ...query, page: meta.next_page ?? current + 1 };
       } else {
@@ -378,7 +469,7 @@ export class ManagementTransport {
 
   /**
    * An escape hatch for a route the generated surface does not cover. `path` is relative to
-   * `/api/v1`. Writes get an `Idempotency-Key` and the approval loop like any operation.
+   * `/api/v1`, or to `/v1` on a client with `apiUrl`. Writes get an `Idempotency-Key` and the approval loop like any operation.
    */
   request<TBody = unknown, O extends CallOptions = CallOptions>(
     method: OperationSpec['method'],
@@ -399,27 +490,67 @@ export class ManagementTransport {
       pagination: null,
     };
 
-    return this.call<TBody, O>(op, [], input?.body ?? input?.query, options);
+    return this.#call<TBody, O>(op, [], input?.body ?? input?.query, options, true);
   }
 
-  #url(op: OperationSpec, pathArgs: readonly string[], query: unknown): string {
-    let index = 0;
-    const path = op.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-      const value = pathArgs[index++];
+  /**
+   * Where an operation goes. Without `apiUrl`: today's method and path on `{baseUrl}/api/v1`.
+   * With it: the operation's `/v1` route, today's path arguments placed where `/v1` takes
+   * them (`v1Routes`), or — for an operation with no `/v1` route — today's path on
+   * `{baseUrl}/api/v1`. `raw` (a `request()` call) takes the path as given.
+   */
+  #resolve(op: OperationSpec, pathArgs: readonly string[], raw: boolean): Resolved {
+    const route = this.v1 && !raw ? v1Routes[`${this.plane} ${op.method} ${op.path}`] : undefined;
 
-      if (value === undefined || value === '') {
-        throw new TypeError(`${op.action ?? op.path}: missing path parameter \`${name}\`.`);
+    if (route === undefined) {
+      let base = this.baseUrl;
+
+      if (this.v1 && !raw) {
+        if (this.legacyBaseUrl === undefined) {
+          throw new ConfigurationError(
+            `${op.action ?? op.path} has no /v1 route yet. Pass \`baseUrl\` as well as \`apiUrl\`, and the client calls it on \`{baseUrl}/api/v1\`.`,
+          );
+        }
+
+        base = this.legacyBaseUrl;
       }
 
-      return encodeURIComponent(value);
+      return { method: op.method, path: fillPath(op, op.path, pathArgs), template: op.path, base, query: {}, body: {} };
+    }
+
+    const pathValues: string[] = [];
+    const query: Record<string, unknown> = {};
+    const body: Record<string, unknown> = {};
+
+    route.args.forEach((arg, index) => {
+      const value = pathArgs[index];
+
+      if (value === undefined || value === '') {
+        throw new TypeError(`${op.action ?? op.path}: missing path parameter \`${op.pathParams[index] ?? index}\`.`);
+      }
+
+      if (arg.in === 'path') {
+        pathValues.push(value);
+      } else {
+        (arg.in === 'query' ? query : body)[arg.name] = value;
+      }
     });
 
-    const url = new URL(`${this.baseUrl}${path}`);
+    return { method: route.method, path: fillPath(op, route.path, pathValues), template: route.path, base: this.baseUrl, query, body };
+  }
+
+  #url(resolved: Resolved, query: unknown): string {
+    const url = new URL(`${resolved.base}${resolved.path}`);
 
     if (isRecord(query)) {
       for (const [key, value] of Object.entries(query)) {
         appendQuery(url.searchParams, key, value);
       }
+    }
+
+    for (const [key, value] of Object.entries(resolved.query)) {
+      url.searchParams.delete(key);
+      appendQuery(url.searchParams, key, value);
     }
 
     return url.toString();
@@ -569,18 +700,25 @@ export class ManagementTransport {
     }
   }
 
-  async #heldApproval(response: Response): Promise<{ approval: PendingApproval; retryAfter: number | undefined } | null> {
+  async #heldApproval(response: Response, base: string): Promise<{ approval: PendingApproval; retryAfter: number | undefined } | null> {
     if (response.status !== 202) {
       return null;
     }
 
     const body = await readJson(response.clone());
 
-    if (!isRecord(body) || body.error !== 'approval_required' || !isRecord(body.approval)) {
+    if (!isRecord(body)) {
       return null;
     }
 
-    const approval = body.approval;
+    // Today: `{error: "approval_required", approval: {…}}`. On `/v1`: the approval itself,
+    // `{object: "approval", id, …}`.
+    const v1Shape = this.v1 && base === this.baseUrl && body.object === 'approval';
+    const approval = body.error === 'approval_required' && isRecord(body.approval) ? body.approval : v1Shape ? body : null;
+
+    if (approval === null) {
+      return null;
+    }
 
     if (typeof approval.id !== 'string' || approval.id === '') {
       return null;
@@ -595,7 +733,9 @@ export class ManagementTransport {
         poll_url:
           typeof approval.poll_url === 'string'
             ? approval.poll_url
-            : `${this.baseUrl}${APPROVAL_MOUNT[this.plane]}/action-approvals/${encodeURIComponent(approval.id)}`,
+            : this.v1 && base === this.baseUrl
+              ? `${base}${V1_APPROVAL_MOUNT[this.plane]}/${encodeURIComponent(approval.id)}`
+              : `${base}${APPROVAL_MOUNT[this.plane]}/action-approvals/${encodeURIComponent(approval.id)}`,
       },
       retryAfter: retryAfterMs(response.headers),
     };
@@ -609,6 +749,7 @@ export class ManagementTransport {
     first: { approval: PendingApproval; retryAfter: number | undefined },
     context: ApprovalContext,
     notify: boolean,
+    base: string,
   ): Promise<ApiResponse<TBody>> {
     let held = first;
 
@@ -617,10 +758,10 @@ export class ManagementTransport {
         await this.#options.onApprovalRequired?.(held.approval, context);
       }
 
-      await this.#awaitApproval(held.approval, held.retryAfter, send.signal);
+      await this.#awaitApproval(held.approval, held.retryAfter, send.signal, base);
 
       const response = await this.#send(method, url, payload, { ...send, approvalId: held.approval.id });
-      const again = await this.#heldApproval(response);
+      const again = await this.#heldApproval(response, base);
 
       if (again === null) {
         return this.#result<TBody>(response, send.idempotencyKey);
@@ -639,10 +780,10 @@ export class ManagementTransport {
   }
 
   /** Poll an approval until the person decides. Resolves on `approved`; throws otherwise. */
-  async #awaitApproval(approval: PendingApproval, initialDelay: number | undefined, signal: AbortSignal | undefined): Promise<void> {
-    const pollUrl = new URL(approval.poll_url, this.baseUrl);
+  async #awaitApproval(approval: PendingApproval, initialDelay: number | undefined, signal: AbortSignal | undefined, base: string): Promise<void> {
+    const pollUrl = new URL(approval.poll_url, base);
 
-    if (pollUrl.origin !== new URL(this.baseUrl).origin) {
+    if (pollUrl.origin !== new URL(base).origin) {
       // The poll carries the same credential as the request. Never hand it to another host.
       throw new CboxIdError(`Refusing to poll approval ${approval.id} at another origin (${pollUrl.origin}).`);
     }
@@ -661,7 +802,8 @@ export class ManagementTransport {
       }
 
       const body = await readJson(response);
-      const data = isRecord(body) && isRecord(body.data) ? body.data : {};
+      // Today `{data: {status}}`; on `/v1` the approval itself, `{object: "approval", status}`.
+      const data = isRecord(body) && isRecord(body.data) ? body.data : this.v1 && isRecord(body) && body.object === 'approval' ? body : {};
       const status = typeof data.status === 'string' ? data.status : 'pending';
 
       switch (status) {
@@ -691,13 +833,33 @@ export class ManagementTransport {
     }
 
     const body = response.status === 204 ? undefined : await readJson(response);
-    const envelope = isRecord(body) && 'data' in body;
+    let data: unknown;
+    let meta: unknown;
+
+    if (this.v1 && isRecord(body) && body.object === 'list') {
+      // `/v1` list: `{object: "list", data, has_more, next_cursor}`. `meta` carries the
+      // paging fields, as today's `{data, meta}` did.
+      data = body.data;
+      meta = {
+        ...(isRecord(body.meta) ? body.meta : {}),
+        has_more: body.has_more === true,
+        next_cursor: typeof body.next_cursor === 'string' ? body.next_cursor : null,
+      };
+    } else if (this.v1 && isRecord(body) && typeof body.object === 'string') {
+      // `/v1` resource: the object itself, which may have a field called `data`.
+      data = body;
+      meta = undefined;
+    } else {
+      const envelope = isRecord(body) && 'data' in body;
+      data = envelope ? body.data : body;
+      meta = envelope ? body.meta : undefined;
+    }
 
     return {
       pending: false,
       status: response.status,
-      data: (envelope ? body.data : body) as ApiResponse<TBody>['data'],
-      meta: (envelope ? body.meta : undefined) as ApiResponse<TBody>['meta'],
+      data: data as ApiResponse<TBody>['data'],
+      meta: meta as ApiResponse<TBody>['meta'],
       body: body as TBody,
       replayed: response.headers.get('idempotent-replayed')?.toLowerCase() === 'true',
       idempotencyKey,
@@ -716,7 +878,12 @@ export class ManagementTransport {
         ? fields.message
         : typeof fields.error_description === 'string'
           ? fields.error_description
-          : `HTTP ${response.status}`;
+          : // An RFC 9457 problem (`/v1`) says `detail`, and `title` at the least.
+            typeof fields.detail === 'string' && fields.detail !== ''
+            ? fields.detail
+            : typeof fields.title === 'string' && fields.title !== ''
+              ? fields.title
+              : `HTTP ${response.status}`;
     const errors: Record<string, string[]> = {};
 
     if (isRecord(fields.errors)) {

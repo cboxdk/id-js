@@ -111,6 +111,12 @@ export interface ManifestPublisherConfig {
   clientSecret: string;
   /** Timeout (ms) for back-channel HTTP calls. Defaults to `10000`. */
   timeoutMs?: number;
+  /**
+   * Cbox ID v3's API host, e.g. `https://api.cboxid.com`. Left out, the manifest goes to
+   * `{issuer}/api/v1/apps/manifest` as today; set, to `{apiUrl}/v1/app-manifests`. The token
+   * is still minted at the issuer.
+   */
+  apiUrl?: string;
 }
 
 /**
@@ -216,7 +222,7 @@ export async function publishManifest(
   const token = await mintToken(config, discovery, timeoutMs);
 
   const response = await fetchWithTimeout(
-    `${config.issuer.replace(/\/$/, '')}/api/v1/apps/manifest`,
+    manifestUrl(config),
     {
       method: 'POST',
       redirect: 'error',
@@ -251,6 +257,23 @@ export async function publishManifest(
     throw new AuthenticationError('Cbox ID did not acknowledge this app and its complete authorization manifest.');
   }
   return summary;
+}
+
+/** `{issuer}/api/v1/apps/manifest`, or `{apiUrl}/v1/app-manifests` on Cbox ID v3. */
+function manifestUrl(config: ManifestPublisherConfig): string {
+  if (config.apiUrl === undefined) {
+    return `${config.issuer.replace(/\/$/, '')}/api/v1/apps/manifest`;
+  }
+
+  const api = config.apiUrl.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+
+  if (api === '') {
+    throw new ConfigurationError('`apiUrl` is empty. Leave it out to push to the issuer.');
+  }
+
+  assertSecureIssuer(api);
+
+  return `${api}/v1/app-manifests`;
 }
 
 async function mintToken(

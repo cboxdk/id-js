@@ -4,6 +4,7 @@ import { assertSecureIssuer } from './issuer.js';
 import { AuthenticationError, ConfigurationError, InvalidStateError, oauthError } from './errors.js';
 import { challenge, createVerifier, randomToken } from './pkce.js';
 import { actor, featureFlags, organization, permissions, roles, sessionId } from './claims.js';
+import { sameId } from './ids.js';
 import { pipeConnectUrl, type PipeProvider } from './vault.js';
 import type {
   AuthorizationPrompt,
@@ -243,7 +244,9 @@ export class CboxIdClient {
 
     const user = await this.identityFrom(tokens, verified);
 
-    if (stored.organization !== undefined && user.organizationId !== stored.organization) {
+    // `sameId`: an app may bind with the API's prefixed id (`org_01J…`) while the token's
+    // `org` claim stays the raw id.
+    if (stored.organization !== undefined && user.organizationId !== stored.organization && !sameId(user.organizationId, stored.organization)) {
       throw new AuthenticationError(
         `The sign-in was bound to organization ${stored.organization}, but the tokens are for ${user.organizationId ?? 'no organization'}. The instance may not support organization selection.`,
       );

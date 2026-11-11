@@ -128,3 +128,16 @@ export interface ApprovalContext {
   method: string;
   path: string;
 }
+
+/** Where one of today's path arguments goes on a `/v1` route. */
+export type V1Arg = { readonly in: 'path' } | { readonly in: 'query' | 'body'; readonly name: string };
+
+/**
+ * An operation's route on Cbox ID v3 (`{apiUrl}/v1`): its method, its path relative to `/v1`,
+ * and where each of today's path arguments goes, in today's order.
+ */
+export interface V1Route {
+  readonly method: OperationSpec['method'];
+  readonly path: string;
+  readonly args: readonly V1Arg[];
+}
