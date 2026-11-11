@@ -5,6 +5,28 @@ in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
 ## [Unreleased]
 
+Cbox ID v3, additive: code that changes nothing behaves exactly as before.
+
+### Added
+
+- `apiUrl` on every management client (`https://api.cboxid.com`, with or without `/v1`).
+  Set, each operation goes to its `/v1` route with today's methods and arguments, from a
+  table generated from `openapi/openapi.json` (`v1Routes`; the few without a route,
+  `v1Unmapped`, keep calling `{baseUrl}/api/v1`). Reads the `/v1` list envelope (`data` the
+  items, `meta.has_more` / `meta.next_cursor`, cursor paging in `listAll()`), resources with
+  `object`, RFC 9457 problems (`detail` as the message) and `/v1` approvals. `baseUrl` is no
+  longer required when `apiUrl` is given.
+- `OrganizationClient`, `OrganizationClientOptions`, `organizationOperations` and the
+  `OrganizationApi` types: the workspace plane under its new name. `cbid_org_…` keys.
+- `rawId`, `isPrefixedId` and `sameId` for prefixed public ids (`org_01J…`). A sign-in bound
+  with a prefixed organization id accepts the raw `org` claim, and permission decisions
+  accept either spelling.
+- `isWebhookEventType`, `currentWebhookEventType`, `legacyWebhookEventType` and
+  `webhookEventTypeAliases`: the old event names and the `id.*` names are one event.
+- `apiUrl` on `publishManifest` (`/v1/app-manifests`) and `VaultClient` (the secret and pipe
+  leases).
+- `npm run generate -- --fetch v1=<host>` refreshes the v3 document.
+
 ## [0.21.0] - 2026-11-08
 
 ### Added

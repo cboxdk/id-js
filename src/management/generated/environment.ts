@@ -5213,8 +5213,8 @@ export const environmentOperations = {
 
 // ── Client ─────────────────────────────────────────────────────────────────────────────────
 
-/** Options for a {@link EnvironmentClient}. `baseUrl` is required: the environment's own host. */
-export type EnvironmentClientOptions = ManagementClientOptions & { baseUrl: string };
+/** Options for a {@link EnvironmentClient}. `baseUrl` (the environment's own host) or `apiUrl` (Cbox ID v3) is required. */
+export type EnvironmentClientOptions = ManagementClientOptions & ({ baseUrl: string } | { apiUrl: string });
 
 /**
  * Cbox ID — Environment Management API.

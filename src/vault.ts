@@ -1,4 +1,5 @@
 import { AuthenticationError, CboxIdError } from './errors.js';
+import { assertSecureIssuer } from './issuer.js';
 
 /** A stored vault secret's metadata (never its plaintext). */
 export interface VaultSecretRef {
@@ -146,13 +147,28 @@ export interface StoreSecretInput {
  */
 export class VaultClient {
   private readonly base: string;
+  /** `{apiUrl}/v1` when `apiUrl` is set: the leases go there. */
+  private readonly v1Base: string | null;
 
+  /**
+   * @param options.apiUrl Cbox ID v3's API host, e.g. `https://api.cboxid.com`. Left out,
+   *   every call goes to `{issuer}/api/v1/vault` as today. Set, the two leases go to `/v1`
+   *   (`POST /v1/vault-secrets/{id}/lease`, `POST /v1/pipe-leases`); storing, rotating,
+   *   revoking and granting stay on the issuer, because `/v1` takes their input differently.
+   */
   constructor(
     issuer: string,
     private readonly token: string,
     private readonly timeoutMs = 10_000,
+    options: { apiUrl?: string } = {},
   ) {
     this.base = `${issuer.replace(/\/$/, '')}/api/v1/vault`;
+    const api = options.apiUrl?.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+    if (api !== undefined && api !== '') {
+      // The leases carry the bearer token: never over plain http (loopback aside).
+      assertSecureIssuer(api);
+    }
+    this.v1Base = api === undefined || api === '' ? null : `${api}/v1`;
   }
 
   /** Ingest a downstream credential, sealed at rest (scope `vault.manage`). */
@@ -205,7 +221,10 @@ export class VaultClient {
    * is identified by the token's client; a lease with no live grant is refused.
    */
   lease(secretId: string, purpose: string): Promise<VaultLease> {
-    return this.json('POST', `/secrets/${encodeURIComponent(secretId)}/lease`, { purpose }).then((raw) => {
+    const path = this.v1Base !== null
+      ? `${this.v1Base}/vault-secrets/${encodeURIComponent(secretId)}/lease`
+      : `/secrets/${encodeURIComponent(secretId)}/lease`;
+    return this.json('POST', path, { purpose }).then((raw) => {
       const r = raw as { secret_id: string; provider: string; secret: string; expires_at: string };
       return { secretId: r.secret_id, provider: r.provider, secret: r.secret, expiresAt: r.expires_at };
     });
@@ -234,7 +253,9 @@ export class VaultClient {
     provider: PipeProvider | string,
     options: { purpose: string; userId?: string },
   ): Promise<PipeToken> {
-    const path = `/pipes/${encodeURIComponent(provider)}/token`;
+    const path = this.v1Base !== null
+      ? `${this.v1Base}/pipe-leases?${new URLSearchParams({ provider }).toString()}`
+      : `/pipes/${encodeURIComponent(provider)}/token`;
     const response = await this.send('POST', path, {
       purpose: options.purpose,
       ...(options.userId !== undefined ? { user_id: options.userId } : {}),
@@ -299,7 +320,8 @@ export class VaultClient {
       if (body) {
         init.body = JSON.stringify(body);
       }
-      return await fetch(`${this.base}${path}`, init);
+      // A path that is already a URL is a `/v1` call (see the constructor).
+      return await fetch(path.startsWith('https://') || path.startsWith('http://') ? path : `${this.base}${path}`, init);
     } finally {
       clearTimeout(timer);
     }
@@ -310,7 +332,9 @@ function pipeLeaseError(response: Response, body: Record<string, unknown>): Pipe
   const error = typeof body.error === 'string' ? body.error : null;
   const message = typeof body.message === 'string' && body.message !== ''
     ? body.message
-    : `The pipe lease failed with status ${response.status}.`;
+    : typeof body.detail === 'string' && body.detail !== ''
+      ? body.detail
+      : `The pipe lease failed with status ${response.status}.`;
   const connectUrl = typeof body.connect_url === 'string' && body.connect_url !== '' ? body.connect_url : null;
   const header = response.headers.get('retry-after')?.trim() ?? '';
   const retryAfter = /^\d+$/.test(header) ? Number(header) : null;
