@@ -1,4 +1,5 @@
 import { AuthenticationError, CboxIdError } from './errors.js';
+import { assertSecureIssuer } from './issuer.js';
 
 /** A stored vault secret's metadata (never its plaintext). */
 export interface VaultSecretRef {
@@ -163,6 +164,10 @@ export class VaultClient {
   ) {
     this.base = `${issuer.replace(/\/$/, '')}/api/v1/vault`;
     const api = options.apiUrl?.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
+    if (api !== undefined && api !== '') {
+      // The leases carry the bearer token: never over plain http (loopback aside).
+      assertSecureIssuer(api);
+    }
     this.v1Base = api === undefined || api === '' ? null : `${api}/v1`;
   }
 

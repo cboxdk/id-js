@@ -350,6 +350,10 @@ describe('apiUrl outside the management clients', () => {
     expect(mock.mock.calls[0]![0]).toBe(`${API}/v1/pipe-leases?provider=github`);
   });
 
+  it('refuses a plain-http apiUrl on the vault client', () => {
+    expect(() => new VaultClient(ISSUER, 't', 10_000, { apiUrl: 'http://api.example.com' })).toThrow(ConfigurationError);
+  });
+
   it('leases a vault secret from /v1, and keeps provisioning on the issuer', async () => {
     const mock = vi.fn(async (_input: unknown, _init?: RequestInit) => json({ secret_id: 's', provider: 'stripe', secret: 'x', expires_at: 'y' }));
     vi.stubGlobal('fetch', mock);
