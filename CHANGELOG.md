@@ -3,7 +3,7 @@
 All notable changes to `@cboxdk/id-js` are recorded here. Earlier releases are described
 in their [GitHub releases](https://github.com/cboxdk/id-js/releases).
 
-## [Unreleased]
+## [0.21.1] - 2026-11-11
 
 Cbox ID v3, additive: code that changes nothing behaves exactly as before.
 
@@ -24,7 +24,7 @@ Cbox ID v3, additive: code that changes nothing behaves exactly as before.
 - `isWebhookEventType`, `currentWebhookEventType`, `legacyWebhookEventType` and
   `webhookEventTypeAliases`: the old event names and the `id.*` names are one event.
 - `apiUrl` on `publishManifest` (`/v1/app-manifests`) and `VaultClient` (the secret and pipe
-  leases).
+  leases), which must be https (loopback aside).
 - `npm run generate -- --fetch v1=<host>` refreshes the v3 document.
 
 ## [0.21.0] - 2026-11-08
